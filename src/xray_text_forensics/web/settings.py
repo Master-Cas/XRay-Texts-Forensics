@@ -30,6 +30,7 @@ class WebSettings(BaseModel):
     oidc_issuer_url: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
+    oidc_access_token_audience: str | None = None
     oidc_scopes: str = "openid profile email"
     oidc_tenant_claim: str = "org_id"
     oidc_role_claim: str = "role"
@@ -95,6 +96,7 @@ class WebSettings(BaseModel):
             oidc_issuer_url=os.environ.get("XRAY_OIDC_ISSUER_URL"),
             oidc_client_id=os.environ.get("XRAY_OIDC_CLIENT_ID"),
             oidc_client_secret=os.environ.get("XRAY_OIDC_CLIENT_SECRET"),
+            oidc_access_token_audience=os.environ.get("XRAY_OIDC_ACCESS_TOKEN_AUDIENCE"),
             oidc_scopes=os.environ.get("XRAY_OIDC_SCOPES", "openid profile email"),
             oidc_tenant_claim=os.environ.get("XRAY_OIDC_TENANT_CLAIM", "org_id"),
             oidc_role_claim=os.environ.get("XRAY_OIDC_ROLE_CLAIM", "role"),
