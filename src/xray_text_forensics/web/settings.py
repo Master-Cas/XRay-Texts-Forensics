@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 EnvironmentName = Literal["development", "test", "production"]
 IdentityMode = Literal["local", "gateway", "oidc"]
+OidcTokenAuthMethod = Literal["client_secret_post", "client_secret_basic"]
 
 
 class WebSettings(BaseModel):
@@ -34,6 +35,7 @@ class WebSettings(BaseModel):
     oidc_role_claim: str = "role"
     oidc_session_ttl_seconds: int = Field(default=8 * 60 * 60, ge=300, le=7 * 24 * 60 * 60)
     oidc_allow_personal_tenant: bool = True
+    oidc_token_auth_method: OidcTokenAuthMethod = "client_secret_post"
 
     @property
     def object_store_root(self) -> Path:
@@ -58,6 +60,19 @@ class WebSettings(BaseModel):
         if identity_mode not in {"local", "gateway", "oidc"}:
             raise ValueError("XRAY_IDENTITY_MODE must be local, gateway, or oidc")
         identity_mode_name = cast(IdentityMode, identity_mode)
+        oidc_token_auth_method = os.environ.get(
+            "XRAY_OIDC_TOKEN_AUTH_METHOD",
+            "client_secret_post",
+        ).strip().casefold()
+        if oidc_token_auth_method not in {"client_secret_post", "client_secret_basic"}:
+            raise ValueError(
+                "XRAY_OIDC_TOKEN_AUTH_METHOD must be client_secret_post "
+                "or client_secret_basic"
+            )
+        oidc_token_auth_method_name = cast(
+            OidcTokenAuthMethod,
+            oidc_token_auth_method,
+        )
 
         docs_default = environment_name != "production"
         return cls(
@@ -91,6 +106,7 @@ class WebSettings(BaseModel):
                 "XRAY_OIDC_ALLOW_PERSONAL_TENANT",
                 True,
             ),
+            oidc_token_auth_method=oidc_token_auth_method_name,
         )
 
 
