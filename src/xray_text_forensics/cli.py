@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -27,14 +28,22 @@ def main() -> None:
 
 @app.command()
 def ingest(
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
-    store: Path = typer.Option(
-        Path(".xray-store"),
-        "--store",
-        help="Local content-addressed evidence store.",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
-    max_mib: int = typer.Option(100, min=1, help="Maximum input size in MiB."),
+    path: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    store: Annotated[
+        Path,
+        typer.Option("--store", help="Local content-addressed evidence store."),
+    ] = Path(".xray-store"),
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+    max_mib: Annotated[
+        int,
+        typer.Option(min=1, help="Maximum input size in MiB."),
+    ] = 100,
 ) -> None:
     """Preserve an artifact and create safe M1 text views when supported."""
 
