@@ -9,6 +9,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, Field
 
 EnvironmentName = Literal["development", "test", "production"]
+IdentityMode = Literal["local", "gateway"]
 
 
 class WebSettings(BaseModel):
@@ -22,6 +23,8 @@ class WebSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = Field(default=8080, ge=1, le=65535)
     desktop_access_token: str | None = None
+    identity_mode: IdentityMode = "local"
+    gateway_shared_secret: str | None = None
 
     @property
     def object_store_root(self) -> Path:
@@ -38,6 +41,11 @@ class WebSettings(BaseModel):
             raise ValueError("XRAY_ENV must be development, test, or production")
 
         environment_name = cast(EnvironmentName, environment)
+        identity_mode = os.environ.get("XRAY_IDENTITY_MODE", "local").strip().casefold()
+        if identity_mode not in {"local", "gateway"}:
+            raise ValueError("XRAY_IDENTITY_MODE must be local or gateway")
+        identity_mode_name = cast(IdentityMode, identity_mode)
+
         docs_default = environment_name != "production"
         return cls(
             data_root=Path(os.environ.get("XRAY_DATA_ROOT", ".xray-web-data")),
@@ -53,6 +61,8 @@ class WebSettings(BaseModel):
             bind_host=os.environ.get("XRAY_HOST", "127.0.0.1"),
             bind_port=_env_int("XRAY_PORT", 8080),
             desktop_access_token=os.environ.get("XRAY_DESKTOP_ACCESS_TOKEN"),
+            identity_mode=identity_mode_name,
+            gateway_shared_secret=os.environ.get("XRAY_GATEWAY_SHARED_SECRET"),
         )
 
 
