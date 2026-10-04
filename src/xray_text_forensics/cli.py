@@ -9,7 +9,13 @@ from typing import Annotated
 
 import typer
 
-from xray_text_forensics.blackbox import blackbox_selftest
+from xray_text_forensics.blackbox import (
+    BlackBoxExperiment,
+    RecordedProviderIdentity,
+    blackbox_selftest,
+    load_design,
+    load_observations_jsonl,
+)
 from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
 from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.cases import CaseStore
@@ -466,3 +472,38 @@ def blackbox_selftest_command(
     typer.echo(f"validated: {report.validated}")
     if not report.validated:
         raise typer.Exit(code=2)
+
+
+@app.command("blackbox-analyze")
+def blackbox_analyze_command(
+    design_path: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    observations_path: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    provider_id: Annotated[str, typer.Option("--provider-id")],
+    model_id: Annotated[str, typer.Option("--model-id")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Analyze externally collected observations under a frozen design."""
+
+    design = load_design(design_path)
+    observations = load_observations_jsonl(observations_path)
+    identity = RecordedProviderIdentity(provider_id=provider_id, model_id=model_id)
+    result = BlackBoxExperiment(design).analyze(identity, observations)
+
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY BLACK-BOX ANALYSIS")
+    typer.echo(f"provider: {result.provider_id}")
+    typer.echo(f"model: {result.model_id}")
+    typer.echo(f"design_sha256: {result.design_sha256}")
+    typer.echo(f"observations: {result.observation_count}")
+    typer.echo(f"statistic: {result.statistic:.8f}")
+    typer.echo(f"p_value: {result.p_value:.8f}")
+    typer.echo(f"significant: {result.significant}")
