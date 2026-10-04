@@ -165,7 +165,8 @@ class CaseStore:
 
             for item in evidence:
                 self.connection.execute(
-                    "INSERT INTO evidence(evidence_id, case_id, artifact_id, payload) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO evidence(evidence_id, case_id, artifact_id, payload) "
+                    "VALUES (?, ?, ?, ?)",
                     (
                         item.evidence_id,
                         case_id,

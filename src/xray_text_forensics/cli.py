@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
+from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.cases import CaseStore
 from xray_text_forensics.core import DetectorRun
-from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.corpus import CorpusEngine
 from xray_text_forensics.corpus.loaders import load_directory
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
