@@ -18,11 +18,46 @@ from xray_text_forensics.core import (
 )
 from xray_text_forensics.ingest import IngestResult, IngestWarning
 
+from .jobs import JobRecord, JobStatus
+
 
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "xray-texts-forensics"
     api_version: str = "v1"
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    checks: dict[str, str]
+    schema_version: int | None = None
+    environment: str
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    kind: str
+    status: JobStatus
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, job: JobRecord) -> JobResponse:
+        return cls(
+            job_id=job.job_id,
+            kind=job.kind,
+            status=job.status,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            result=job.result,
+            error="Job failed" if job.status is JobStatus.FAILED else None,
+            metadata=job.metadata,
+        )
 
 
 class ArtifactResponse(BaseModel):
