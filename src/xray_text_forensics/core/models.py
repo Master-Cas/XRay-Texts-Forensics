@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -15,7 +15,7 @@ def _id(prefix: str) -> str:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class EvidenceStatus(StrEnum):
@@ -91,7 +91,7 @@ class EvidenceLocation(BaseModel):
     label: str | None = None
 
     @model_validator(mode="after")
-    def end_not_before_start(self) -> "EvidenceLocation":
+    def end_not_before_start(self) -> EvidenceLocation:
         if self.end < self.start:
             raise ValueError("location end must be >= start")
         return self
@@ -113,7 +113,7 @@ class Evidence(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
-    def require_reason_for_non_test(self) -> "Evidence":
+    def require_reason_for_non_test(self) -> Evidence:
         if self.status in {
             EvidenceStatus.NOT_TESTABLE,
             EvidenceStatus.INSUFFICIENT_DATA,
