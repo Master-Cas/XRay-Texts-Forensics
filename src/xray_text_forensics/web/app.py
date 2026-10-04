@@ -424,9 +424,29 @@ def _safe_identifier(value: str) -> str:
     return "".join(character for character in value if character.isalnum() or character in "-_")
 
 
+def _tenant_storage(
+    request: Request,
+    resolver: TenantStorageResolver,
+) -> TenantStorage:
+    return resolver.for_principal(principal_from_request(request))
+
+
+def _identity_provider(settings: WebSettings) -> IdentityProvider:
+    if settings.identity_mode == "local":
+        return LocalIdentityProvider()
+
+    secret = settings.gateway_shared_secret
+    if secret is None:
+        raise ValueError(
+            "XRAY_GATEWAY_SHARED_SECRET is required when XRAY_IDENTITY_MODE=gateway"
+        )
+    return GatewayIdentityProvider(shared_secret=secret)
+
 
 def _readiness(settings: WebSettings) -> ReadinessResponse:
-    checks: dict[str, str] = {}
+    checks: dict[str, str] = {
+        "identity_mode": settings.identity_mode,
+    }
     schema_version: int | None = None
 
     try:
