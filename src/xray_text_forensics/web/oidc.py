@@ -465,33 +465,11 @@ class GenericOidcClient:
         discovery: dict[str, Any],
         expected_nonce: str,
     ) -> dict[str, Any]:
-        header = jwt.get_unverified_header(token)
-        algorithm = header.get("alg")
-        advertised = set(discovery.get("id_token_signing_alg_values_supported", []))
-        allowed = _SAFE_ID_TOKEN_ALGS & advertised if advertised else _SAFE_ID_TOKEN_ALGS
-        if algorithm not in allowed:
-            raise OidcError("OIDC ID token uses an unsupported signing algorithm")
-
-        if self._jwks_client is None:
-            self._jwks_client = jwt.PyJWKClient(
-                str(discovery["jwks_uri"]),
-                cache_keys=True,
-                lifespan=300,
-            )
-        try:
-            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=[str(algorithm)],
-                audience=self.client_id,
-                issuer=str(discovery["issuer"]),
-                options={
-                    "require": ["exp", "iat", "iss", "aud", "sub", "nonce"],
-                },
-            )
-        except jwt.PyJWTError as exc:
-            raise OidcError("OIDC ID token validation failed") from exc
+        claims = self._verify_signed_token(
+            token,
+            discovery=discovery,
+            required_claims=["exp", "iat", "iss", "aud", "sub", "nonce"],
+        )
 
         nonce = claims.get("nonce")
         if not isinstance(nonce, str) or not hmac.compare_digest(
@@ -504,7 +482,7 @@ class GenericOidcClient:
         if authorized_party is not None and authorized_party != self.client_id:
             raise OidcError("OIDC authorized-party claim does not match client")
 
-        return dict(claims)
+        return claims
 
     def _verify_access_token(
         self,
