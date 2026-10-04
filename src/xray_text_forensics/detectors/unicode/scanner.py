@@ -95,7 +95,10 @@ _SPECS: tuple[_FindingSpec, ...] = (
     _FindingSpec(
         "BIDI_CONTROL",
         lambda c: ord(c) in _BIDI,
-        "Bidirectional control characters can alter visual ordering without changing logical order.",
+        (
+            "Bidirectional control characters can alter visual ordering "
+            "without changing logical order."
+        ),
     ),
     _FindingSpec(
         "UNICODE_TAG_CHARACTER",
@@ -110,7 +113,10 @@ _SPECS: tuple[_FindingSpec, ...] = (
     _FindingSpec(
         "SPACE_VARIANT",
         lambda c: ord(c) in _SPACE_VARIANTS,
-        "Non-ASCII spacing character present; this is descriptive evidence, not proof of manipulation.",
+        (
+            "Non-ASCII spacing character present; this is descriptive evidence, "
+            "not proof of manipulation."
+        ),
     ),
     _FindingSpec(
         "CONTROL_CHARACTER",
