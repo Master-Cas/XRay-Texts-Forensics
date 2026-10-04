@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 import re
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -111,7 +111,7 @@ def principal_from_request(request: Request) -> Principal:
     return principal
 
 
-def _valid_id(value: str | None) -> bool:
+def _valid_id(value: str | None) -> TypeGuard[str]:
     return value is not None and _ID_RE.fullmatch(value) is not None
 
 
