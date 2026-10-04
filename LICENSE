@@ -1,0 +1,117 @@
+XRay Source-Available Commercial License v1.0
+Copyright (c) 2026 Master-Cas
+All Rights Reserved.
+
+1. Definitions
+
+"Software" means the XRay Texts Forensics source code, object code, documentation,
+schemas, tests, and other original materials distributed with this license, excluding
+third-party components that are separately licensed.
+
+"Licensor" means Master-Cas.
+
+"Commercial Use" means use primarily intended for commercial advantage, monetary
+compensation, revenue generation, paid services, production services for third parties,
+or incorporation into a commercial product or service.
+
+2. Limited Permission
+
+Subject to the terms of this license, the Licensor grants you a limited, non-exclusive,
+non-transferable, revocable permission to:
+
+a. access and view the source code;
+b. run the Software for personal evaluation, testing, learning, and non-commercial
+   academic or research purposes;
+c. make private modifications solely for those permitted purposes, provided those
+   modifications are not distributed, sublicensed, sold, hosted, or otherwise made
+   available to third parties.
+
+3. Restrictions
+
+Except with prior written permission from the Licensor, you may not:
+
+a. use the Software for Commercial Use;
+b. sell, rent, lease, sublicense, license, monetize, or commercially exploit the Software;
+c. provide the Software, or a substantially similar service based on the Software, as
+   software-as-a-service, hosted service, managed service, API service, or platform;
+d. distribute or redistribute the Software or modified versions of the Software outside
+   mechanisms automatically provided by the hosting platform and required for ordinary
+   repository collaboration;
+e. incorporate the Software or substantial portions of it into another commercial
+   product or service;
+f. use the Software to create, operate, or materially enable a competing commercial
+   text-forensics, watermark-detection, provenance-analysis, AI-text-auditing, or
+   substantially similar product or service;
+g. remove or alter copyright, license, attribution, trademark, or proprietary notices;
+h. use proprietary detector keys, private corpora, private models, customer data,
+   production infrastructure, or other separately protected materials unless separately
+   authorized.
+
+4. Academic and Research Use
+
+Non-commercial academic and research use is permitted under Section 2.
+
+Publications or presentations that materially rely on the Software must provide
+reasonable attribution to "XRay Texts Forensics / Master-Cas" and, when practical,
+reference the public repository.
+
+This license does not grant permission to redistribute the Software or modified versions
+as part of a paper, dataset, benchmark package, course bundle, or other publication.
+
+5. Contributions
+
+Unless a separate written contributor agreement states otherwise, contributions accepted
+into the Licensor-controlled repository may be used, modified, relicensed, and distributed
+by the Licensor as part of XRay and related commercial or non-commercial offerings.
+
+Do not submit contributions unless you have the right to grant those permissions.
+
+6. Third-Party Components
+
+Third-party software, datasets, models, papers, libraries, or other materials remain
+subject to their own licenses and terms. This license applies only to original XRay
+materials for which the Licensor holds the applicable rights.
+
+See THIRD_PARTY_NOTICES.md for recorded third-party notices.
+
+7. No Trademark Grant
+
+No right is granted to use the names "XRay", "XRay Texts Forensics", "XRay Audit Lab",
+"Master-Cas", or related marks, logos, branding, or product identities in a way that
+suggests endorsement, affiliation, or origin.
+
+8. Commercial Licensing
+
+Commercial permissions, including SaaS, enterprise, redistribution, OEM, integration,
+private deployment, and other commercial uses, may be available under a separate written
+license from the Licensor.
+
+9. Termination
+
+Your rights under this license terminate automatically if you materially violate its
+terms. Upon termination, you must cease all use that depends on permissions granted by
+this license.
+
+10. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, ACCURACY, RELIABILITY, TITLE, AND NON-INFRINGEMENT.
+
+The Software performs forensic and statistical analysis. Results may be probabilistic,
+inconclusive, unavailable, or subject to false positives and false negatives. The
+Software must not be treated as sole proof of authorship, misconduct, provenance, or
+legal responsibility.
+
+11. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR SHALL NOT BE LIABLE FOR
+ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR
+FOR LOSS OF PROFITS, DATA, REPUTATION, BUSINESS, OR OPPORTUNITY, ARISING FROM OR RELATED
+TO THE SOFTWARE OR ITS USE.
+
+12. Reservation of Rights
+
+All rights not expressly granted by this license are reserved by the Licensor.
+
+This license is source-available and is not an OSI-approved open-source license.

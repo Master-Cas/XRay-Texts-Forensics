@@ -65,7 +65,7 @@ ORIGINAL ARTIFACT
       REPORT            API
 ```
 
-See [Master Architecture V1](docs/architecture/MASTER_ARCHITECTURE_V1.md), [ADR-001 — Platform Strategy](docs/architecture/ADR-001-PLATFORM-STRATEGY.md), and the [Scientific Contract](docs/methodology/SCIENTIFIC_CONTRACT.md).
+See [Master Architecture V1](docs/architecture/MASTER_ARCHITECTURE_V1.md), [ADR-001 — Platform Strategy](docs/architecture/ADR-001-PLATFORM-STRATEGY.md), [ADR-002 — Licensing & IP Strategy](docs/architecture/ADR-002-LICENSING-IP-STRATEGY.md), and the [Scientific Contract](docs/methodology/SCIENTIFIC_CONTRACT.md).
 
 ## Platform strategy
 
@@ -109,4 +109,13 @@ mypy src
 
 ## License
 
-The repository is public while the project license is intentionally **undecided** during the architecture phase. Do not assume an open-source grant until a LICENSE file is added.
+XRay Texts Forensics is **source-available proprietary software**.
+
+The source can be inspected and used for limited personal evaluation and non-commercial
+academic/research purposes under the terms of the
+[XRay Source-Available Commercial License v1.0](LICENSE).
+
+Commercial use, SaaS/hosting, resale, redistribution, commercial incorporation, and
+competing commercial use require prior written permission from the Licensor.
+
+This is **not an OSI-approved open-source license**.
