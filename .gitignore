@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+keys/
+
+# Forensic/private material — NEVER commit raw case data
+cases/private/
+corpora/raw/
+evidence/raw/
+artifacts/raw/
+*.case.db
+*.evidence.db
+
+# Generated reports / local databases
+reports/generated/
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+
+# Local scratch
+tmp/
+scratch/

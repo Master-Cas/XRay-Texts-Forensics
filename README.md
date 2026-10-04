@@ -2,17 +2,31 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: early architecture / M0 foundation.
+> Status: **M0 — Foundation & Scientific Contract**
 
-## Core principle
+## What XRay is
+
+XRay treats text as forensic evidence. It preserves the original artifact, derives explicit analysis views, runs independent detector families, and records every result as traceable evidence.
 
 XRay does **not** collapse all signals into a single “AI score”.
 
-Watermark evidence, stylometric evidence, Unicode evidence, similarity evidence, manipulation evidence, and provenance evidence remain separate and traceable.
+```text
+watermark evidence
+      !=
+stylometric evidence
+      !=
+Unicode evidence
+      !=
+similarity evidence
+      !=
+manipulation evidence
+      !=
+provenance evidence
+```
 
 ## Scientific status vocabulary
 
-Every detector result must use one of these states:
+Every detector result must use exactly one of these states:
 
 - `DETECTED`
 - `NOT_DETECTED`
@@ -21,7 +35,37 @@ Every detector result must use one of these states:
 - `INSUFFICIENT_DATA`
 - `ERROR`
 
-In particular, **NOT_TESTABLE is not equivalent to NOT_DETECTED**.
+**NOT_TESTABLE is not equivalent to NOT_DETECTED.**
+
+## Architecture
+
+```text
+FORENSIC INGEST
+      |
+      v
+ORIGINAL ARTIFACT
+      |
+      +--> immutable bytes
+      +--> derived views
+                |
+       +--------+---------+
+       |        |         |
+   watermark  linguistic  similarity
+       |        |         |
+       +--------+---------+
+                |
+             EVIDENCE
+                |
+          CALIBRATION
+                |
+          EVIDENCE GRAPH
+                |
+        +-------+-------+
+        |               |
+      REPORT            API
+```
+
+See [Master Architecture V1](docs/architecture/MASTER_ARCHITECTURE_V1.md) and the [Scientific Contract](docs/methodology/SCIENTIFIC_CONTRACT.md).
 
 ## Development roadmap
 
@@ -36,4 +80,17 @@ In particular, **NOT_TESTABLE is not equivalent to NOT_DETECTED**.
 - M8 — Black-Box Audit Lab
 - M9 — Adversarial Lab
 
-License decision is intentionally pending during the architecture phase.
+## Development
+
+Requires Python 3.12+.
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+ruff check .
+mypy src
+```
+
+## License
+
+The repository is public while the project license is intentionally **undecided** during the architecture phase. Do not assume an open-source grant until a LICENSE file is added.
