@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import socket
@@ -122,10 +123,8 @@ class DesktopServer:
         if thread is not None:
             thread.join(timeout=5)
         if listener is not None:
-            try:
+            with contextlib.suppress(OSError):
                 listener.close()
-            except OSError:
-                pass
 
         self._server = None
         self._thread = None
