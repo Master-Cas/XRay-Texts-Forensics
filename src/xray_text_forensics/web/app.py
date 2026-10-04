@@ -263,7 +263,7 @@ def create_app(
 
     @app.get("/api/v1/ready", response_model=None)
     def ready() -> JSONResponse:
-        response = _readiness(settings)
+        response = _readiness(settings, oidc_store)
         status_code = 200 if response.status == "ready" else 503
         return JSONResponse(
             status_code=status_code,
@@ -571,7 +571,10 @@ def _identity_provider(settings: WebSettings) -> IdentityProvider:
     return GatewayIdentityProvider(shared_secret=secret)
 
 
-def _readiness(settings: WebSettings) -> ReadinessResponse:
+def _readiness(
+    settings: WebSettings,
+    oidc_store: OidcSessionStore | None = None,
+) -> ReadinessResponse:
     checks: dict[str, str] = {
         "identity_mode": settings.identity_mode,
     }
@@ -584,6 +587,13 @@ def _readiness(settings: WebSettings) -> ReadinessResponse:
             checks["journal_mode"] = store.journal_mode()
     except Exception:
         checks["database"] = "error"
+
+    if settings.identity_mode == "oidc":
+        if oidc_store is None:
+            checks["auth_database"] = "error"
+        else:
+            checks["auth_database"] = "ok"
+            checks["auth_journal_mode"] = oidc_store.journal_mode()
 
     probe = settings.object_store_root / f".ready-{uuid4().hex}"
     try:
@@ -600,11 +610,19 @@ def _readiness(settings: WebSettings) -> ReadinessResponse:
         except OSError:
             checks["object_store_cleanup"] = "error"
 
+    oidc_ok = (
+        settings.identity_mode != "oidc"
+        or (
+            checks.get("auth_database") == "ok"
+            and checks.get("auth_journal_mode") == "wal"
+        )
+    )
     required_ok = (
         checks.get("database") == "ok"
         and checks.get("journal_mode") == "wal"
         and checks.get("object_store") == "ok"
         and "object_store_cleanup" not in checks
+        and oidc_ok
     )
     return ReadinessResponse(
         status="ready" if required_ok else "not_ready",
