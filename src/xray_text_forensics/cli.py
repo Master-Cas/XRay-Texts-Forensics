@@ -9,6 +9,7 @@ from typing import Annotated
 
 import typer
 
+from xray_text_forensics.blackbox import blackbox_selftest
 from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
 from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.cases import CaseStore
@@ -424,3 +425,44 @@ def case_report(
         raise typer.BadParameter("format must be json, html, or pdf")
 
     typer.echo(str(output))
+
+
+@app.command("blackbox-selftest")
+def blackbox_selftest_command(
+    permutations: Annotated[
+        int,
+        typer.Option("--permutations", min=19, help="Permutation count."),
+    ] = 499,
+    samples_per_cell: Annotated[
+        int,
+        typer.Option("--samples-per-cell", min=2),
+    ] = 40,
+    alpha: Annotated[
+        float,
+        typer.Option("--alpha", min=0.0001, max=0.5),
+    ] = 0.01,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate the black-box statistic against synthetic OFF/ON controls."""
+
+    report = blackbox_selftest(
+        permutation_count=permutations,
+        samples_per_cell=samples_per_cell,
+        alpha=alpha,
+    )
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY BLACK-BOX SELFTEST")
+    typer.echo(
+        f"OFF: p={report.off.p_value:.6f} "
+        f"significant={report.off.significant}"
+    )
+    typer.echo(
+        f"ON:  p={report.on.p_value:.6f} "
+        f"significant={report.on.significant}"
+    )
+    typer.echo(f"validated: {report.validated}")
+    if not report.validated:
+        raise typer.Exit(code=2)
