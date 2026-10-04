@@ -16,6 +16,15 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def main() -> None:
+    """XRay command group.
+
+    The callback intentionally keeps Typer in multi-command mode so the public CLI
+    remains stable as new commands such as inspect, compare, and report are added.
+    """
+
+
 @app.command()
 def ingest(
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
