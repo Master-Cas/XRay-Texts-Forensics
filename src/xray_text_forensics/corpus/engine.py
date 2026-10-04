@@ -144,7 +144,8 @@ class CorpusEngine:
     def _cooccurrence_value(self, first: str, second: str) -> int:
         if first == second:
             return 0
-        key = (first, second) if first < second else (second, first)\n        return self.cooccurrence[key]
+        key = (first, second) if first < second else (second, first)
+        return self.cooccurrence[key]
 
     def tfidf_document_matrix(self) -> tuple[np.ndarray, list[str]]:
         if not self.documents:
