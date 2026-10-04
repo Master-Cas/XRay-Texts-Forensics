@@ -17,7 +17,8 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 import jwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from starlette.requests import Request
 
 from .identity import IdentityProvider, Principal
 
@@ -277,7 +278,7 @@ class OidcSessionIdentityProvider(IdentityProvider):
     def __init__(self, store: OidcSessionStore) -> None:
         self.store = store
 
-    async def authenticate(self, request: Any) -> Principal | None:
+    async def authenticate(self, request: Request) -> Principal | None:
         session_id = request.cookies.get(SESSION_COOKIE)
         if not session_id:
             return None
