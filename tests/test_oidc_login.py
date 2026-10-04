@@ -281,7 +281,10 @@ def test_generic_oidc_maps_org_role_and_personal_fallback(monkeypatch) -> None:
             return None
 
         def json(self) -> dict[str, str]:
-            return {"id_token": "fake-token"}
+            return {
+                "id_token": "fake-id-token",
+                "access_token": "fake-access-token",
+            }
 
     monkeypatch.setattr(
         "xray_text_forensics.web.oidc.httpx.post",
@@ -294,9 +297,17 @@ def test_generic_oidc_maps_org_role_and_personal_fallback(monkeypatch) -> None:
         "_verify_id_token",
         lambda *args, **kwargs: {
             "sub": "user_1",
+            "exp": now + 600,
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_verify_access_token",
+        lambda *args, **kwargs: {
+            "sub": "user_1",
             "org_id": "org_1",
             "role": "admin",
-            "exp": now + 600,
+            "exp": now + 300,
         },
     )
     principal, _ = client.complete(
@@ -317,6 +328,14 @@ def test_generic_oidc_maps_org_role_and_personal_fallback(monkeypatch) -> None:
         lambda *args, **kwargs: {
             "sub": "user_2",
             "exp": now + 600,
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_verify_access_token",
+        lambda *args, **kwargs: {
+            "sub": "user_2",
+            "exp": now + 300,
         },
     )
     personal, _ = client.complete(
