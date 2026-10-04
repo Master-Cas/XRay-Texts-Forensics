@@ -1,11 +1,15 @@
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
 
 project_root = Path(SPECPATH).parents[1]
 webview_datas, webview_binaries, webview_hiddenimports = collect_all("webview")
 
-datas = collect_data_files("xray_text_forensics.web") + webview_datas
+datas = (
+    collect_data_files("xray_text_forensics.web")
+    + copy_metadata("xray-texts-forensics")
+    + webview_datas
+)
 hiddenimports = webview_hiddenimports + [
     "uvicorn.logging",
     "uvicorn.loops.auto",

@@ -17,6 +17,7 @@ on:
       - "tests/test_web_ui.py"
       - "tests/test_production_readiness.py"
       - "tests/test_runtime_paths.py"
+      - "tests/test_windows_installer_config.py"
       - "packaging/windows/**"
       - "pyproject.toml"
       - ".github/workflows/windows-desktop.yml"
@@ -34,20 +35,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build dependencies
+      - name: Install Python build dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,desktop,packaging]"
 
       - name: Windows-focused tests
         run: |
-          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py tests/test_runtime_paths.py
+          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py tests/test_runtime_paths.py tests/test_windows_installer_config.py
 
       - name: Build desktop bundle
         run: |
           pyinstaller packaging/windows/xray-desktop.spec --noconfirm --clean
 
-      - name: Verify executable and checksum
+      - name: Verify portable executable and checksum
         shell: pwsh
         run: |
           $exe = "dist/XRay-Texts-Forensics/XRay-Texts-Forensics.exe"
@@ -59,9 +60,99 @@ jobs:
           Get-Item $exe | Format-List Name,Length,FullName
           Get-Content "dist/XRay-Texts-Forensics/SHA256SUMS.txt"
 
-      - name: Upload Windows alpha
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $source = (Resolve-Path "dist/XRay-Texts-Forensics").Path
+          $output = Join-Path $PWD "dist-installer"
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-Command iscc.exe -ErrorAction Stop).Source
+          }
+          & $iscc "packaging/windows/installer.iss" "/DMyAppVersion=$version" "/DSourceDir=$source" "/DOutputDir=$output"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Smoke install and uninstall
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path "dist-installer/XRay-Texts-Forensics-Windows-Setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP "XRayInstall"
+          $dataDir = Join-Path $env:LOCALAPPDATA "XRay Texts Forensics"
+          $marker = Join-Path $dataDir "installer-data-retention-marker.txt"
+
+          New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+          "preserve-me" | Set-Content $marker
+
+          $install = Start-Process -FilePath $installer -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/SP-",
+            "/DIR=$installDir"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            throw "Installer exited with code $($install.ExitCode)"
+          }
+
+          $installedExe = Join-Path $installDir "XRay-Texts-Forensics.exe"
+          if (-not (Test-Path $installedExe)) {
+            throw "Installed executable is missing"
+          }
+
+          $uninstaller = Get-ChildItem -Path $installDir -Filter "unins*.exe" | Select-Object -First 1
+          if ($null -eq $uninstaller) {
+            throw "Uninstaller was not created"
+          }
+
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Uninstaller exited with code $($uninstall.ExitCode)"
+          }
+
+          if (Test-Path $installedExe) {
+            throw "Installed executable remains after uninstall"
+          }
+          if (-not (Test-Path $marker)) {
+            throw "User forensic data was deleted by uninstall"
+          }
+
+          Remove-Item -Path $dataDir -Recurse -Force
+
+      - name: Verify installer checksum
+        shell: pwsh
+        run: |
+          $installer = "dist-installer/XRay-Texts-Forensics-Windows-Setup.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer was not produced"
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
+          "$hash  XRay-Texts-Forensics-Windows-Setup.exe" | Set-Content "dist-installer/SHA256SUMS.txt"
+          Get-Item $installer | Format-List Name,Length,FullName
+          Get-Content "dist-installer/SHA256SUMS.txt"
+
+      - name: Upload Windows portable alpha
         uses: actions/upload-artifact@v4
         with:
           name: XRay-Texts-Forensics-Windows-alpha
           path: dist/XRay-Texts-Forensics/
+          if-no-files-found: error
+
+      - name: Upload Windows installer alpha
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRay-Texts-Forensics-Windows-Installer-alpha
+          path: dist-installer/
           if-no-files-found: error
