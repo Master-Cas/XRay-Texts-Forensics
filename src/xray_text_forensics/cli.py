@@ -9,6 +9,8 @@ from typing import Annotated
 import typer
 
 from xray_text_forensics.corpus import CorpusEngine
+from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
+from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.corpus.loaders import load_directory
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
 from xray_text_forensics.detectors.watermark import (
@@ -207,3 +209,62 @@ def watermark_redgreen(
         typer.echo(f"z_score: {item.parameters['z_score']:.4f}")
     if item.reason:
         typer.echo(f"reason: {item.reason}")
+
+
+@app.command("calibrate-scores")
+def calibrate_scores(
+    development_controls: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    held_out_test: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    detector_id: Annotated[str, typer.Option("--detector-id")],
+    detector_version: Annotated[str, typer.Option("--detector-version")] = "unknown",
+    dataset_id: Annotated[str, typer.Option("--dataset-id")] = "dataset",
+    dataset_version: Annotated[str, typer.Option("--dataset-version")] = "unknown",
+    target_fpr: Annotated[
+        float,
+        typer.Option("--target-fpr", min=0.0, max=1.0),
+    ] = 0.01,
+    lower_is_positive: Annotated[
+        bool,
+        typer.Option("--lower-is-positive", help="Lower scores indicate positives."),
+    ] = False,
+    min_controls: Annotated[
+        int,
+        typer.Option("--min-controls", min=1),
+    ] = 100,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Calibrate on development controls and evaluate once on held-out scores."""
+
+    controls = load_score_jsonl(development_controls)
+    test_samples = load_score_jsonl(held_out_test)
+    config = CalibrationConfig(
+        target_fpr=target_fpr,
+        higher_is_positive=not lower_is_positive,
+        min_control_samples=min_controls,
+    )
+    manifest = calibrate(
+        controls,
+        config=config,
+        detector_id=detector_id,
+        detector_version=detector_version,
+        dataset_id=dataset_id,
+        dataset_version=dataset_version,
+    )
+    report = evaluate(test_samples, manifest)
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY CALIBRATION / HELD-OUT EVALUATION")
+    typer.echo(f"threshold: {manifest.threshold:.8g}")
+    typer.echo(f"dev empirical FPR: {manifest.dev_empirical_fpr:.6f}")
+    typer.echo(f"held-out FPR: {report.fpr:.6f}")
+    typer.echo(f"held-out TPR: {report.tpr:.6f}")
+    typer.echo(f"ROC-AUC: {report.roc_auc if report.roc_auc is not None else 'n/a'}")
