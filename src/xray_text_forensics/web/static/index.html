@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>XRay Texts Forensics</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="XRay Texts Forensics home">
+      <span class="brand-mark" aria-hidden="true">XR</span>
+      <span><strong>XRay</strong><small>Texts Forensics</small></span>
+    </a>
+    <div class="topbar-actions">
+      <span id="health-badge" class="status status-pending">Checking engine…</span>
+      <a class="docs-link" href="/docs">API Docs</a>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <p class="eyebrow">Workspace</p>
+      <button class="nav-item active" data-panel="scan-panel" type="button">
+        <span class="nav-icon">⌁</span>Quick Scan
+      </button>
+      <button class="nav-item" data-panel="cases-panel" type="button">
+        <span class="nav-icon">□</span>Cases
+      </button>
+      <button class="nav-item" data-panel="compare-panel" type="button">
+        <span class="nav-icon">⇄</span>Compare
+      </button>
+      <div class="sidebar-note">
+        <strong>Evidence, not verdicts.</strong>
+        <p>Watermark, Unicode, style and provenance signals remain separate.</p>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section id="scan-panel" class="panel active" aria-labelledby="scan-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Quick Scan</p>
+            <h1 id="scan-title">Inspect a text artifact</h1>
+            <p>Preserve the original bytes, then expose deterministic Unicode evidence.</p>
+          </div>
+        </div>
+
+        <form id="scan-form" class="upload-card">
+          <label class="file-drop" for="scan-file">
+            <span class="drop-symbol">＋</span>
+            <strong>Select a document</strong>
+            <span>TXT, Markdown, JSON, CSV, HTML, DOCX or PDF</span>
+            <input id="scan-file" name="file" type="file" required>
+          </label>
+          <button class="primary-button" type="submit">Analyze Unicode</button>
+        </form>
+
+        <div id="scan-progress" class="progress-message" hidden></div>
+        <section id="scan-summary" class="result-section" hidden>
+          <h2>Artifact</h2>
+          <div id="artifact-cards" class="metric-grid"></div>
+          <div class="result-toolbar">
+            <h2>Evidence</h2>
+            <span id="evidence-count" class="pill"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Finding</th><th>Status</th><th>Count / detail</th><th>Detector</th></tr>
+              </thead>
+              <tbody id="evidence-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="cases-panel" class="panel" aria-labelledby="cases-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Case workspace</p>
+            <h1 id="cases-title">Build a traceable investigation</h1>
+            <p>Persist artifacts, detector runs, evidence IDs and the audit chain.</p>
+          </div>
+        </div>
+
+        <div class="two-column">
+          <form id="case-create-form" class="surface">
+            <h2>New case</h2>
+            <label for="case-title">Case title</label>
+            <input id="case-title" type="text" maxlength="200" placeholder="Investigation title" required>
+            <button class="primary-button" type="submit">Create case</button>
+          </form>
+
+          <form id="case-open-form" class="surface">
+            <h2>Open case</h2>
+            <label for="case-id-input">Case ID</label>
+            <input id="case-id-input" type="text" placeholder="case_…" required>
+            <button class="secondary-button" type="submit">Load case</button>
+          </form>
+        </div>
+
+        <section id="case-workspace" class="surface case-workspace" hidden>
+          <div class="case-header">
+            <div>
+              <p class="eyebrow">Active case</p>
+              <h2 id="case-name"></h2>
+              <code id="active-case-id"></code>
+            </div>
+            <span id="audit-badge" class="status"></span>
+          </div>
+
+          <form id="case-analyze-form" class="inline-form">
+            <label for="case-file">Add artifact + Unicode analysis</label>
+            <input id="case-file" type="file" required>
+            <button class="primary-button" type="submit">Add to case</button>
+          </form>
+
+          <div class="case-stats metric-grid" id="case-stats"></div>
+          <div class="report-actions">
+            <a id="report-html" class="secondary-button" target="_blank" rel="noopener">Open HTML report</a>
+            <a id="report-pdf" class="secondary-button" target="_blank" rel="noopener">Open PDF report</a>
+            <a id="report-json" class="secondary-button" target="_blank" rel="noopener">Open JSON report</a>
+          </div>
+
+          <div class="result-toolbar">
+            <h2>Case evidence</h2>
+            <span id="case-evidence-count" class="pill"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Evidence ID</th><th>Finding</th><th>Family</th><th>Status</th></tr>
+              </thead>
+              <tbody id="case-evidence-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="compare-panel" class="panel" aria-labelledby="compare-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Transformation analysis</p>
+            <h1 id="compare-title">Compare original vs. transformed</h1>
+            <p>Measure lexical and sequence preservation without calling it semantic equivalence.</p>
+          </div>
+        </div>
+
+        <form id="compare-form" class="surface">
+          <div class="two-column">
+            <div>
+              <label for="original-file">Original document</label>
+              <input id="original-file" type="file" required>
+            </div>
+            <div>
+              <label for="transformed-file">Transformed document</label>
+              <input id="transformed-file" type="file" required>
+            </div>
+          </div>
+          <button class="primary-button" type="submit">Compare files</button>
+        </form>
+
+        <section id="compare-results" class="result-section" hidden>
+          <h2>Preservation metrics</h2>
+          <div id="compare-metrics" class="metric-grid"></div>
+          <p class="scientific-note">
+            These are lexical/sequence metrics. They are not proof that meaning was preserved.
+          </p>
+        </section>
+      </section>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </main>
+  </div>
+</body>
+</html>
