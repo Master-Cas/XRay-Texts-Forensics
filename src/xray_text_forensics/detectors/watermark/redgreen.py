@@ -211,11 +211,11 @@ def generate_reference_watermarked_text(
     words = list(seed)
     ids = [tokenizer.token_id(word) for word in words]
 
-    candidates = [f"token{index}" for index in range(candidate_count)]
-    candidate_ids = [(word, tokenizer.token_id(word)) for word in candidates]
-
     while len(words) < token_count:
         context = tuple(ids[-config.context_width :])
+        position = len(words)
+        candidates = [f"token{position}x{index}" for index in range(candidate_count)]
+        candidate_ids = [(word, tokenizer.token_id(word)) for word in candidates]
         chosen_word, chosen_id = candidate_ids[0]
         for word, token_id in candidate_ids:
             if _is_green(context, token_id, secret, config.gamma):
