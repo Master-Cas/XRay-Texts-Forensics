@@ -39,7 +39,7 @@ def test_installer_is_per_user_and_preserves_forensic_data() -> None:
 
     assert "PrivilegesRequired=lowest" in script
     assert "DefaultDirName={localappdata}\\Programs\\XRay Texts Forensics" in script
-    assert "XRay Texts Forensics.exe" in script
+    assert "XRay-Texts-Forensics.exe" in script
     assert "[UninstallDelete]" not in script
     assert "userappdata" not in script.casefold()
 
