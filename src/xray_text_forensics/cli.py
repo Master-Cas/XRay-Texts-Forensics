@@ -354,12 +354,14 @@ def case_import_unicode(
 
     ingest_result = _ingestor(store, 100).ingest_path(path)
     context = analysis_context_from_ingest(ingest_result)
+    started_at = datetime.now(UTC)
     evidence = UnicodeForensicsSuite().analyze(context)
     run = DetectorRun(
         detector_id="unicode.forensics.suite",
         detector_version="1.0.0",
         artifact_id=ingest_result.artifact.artifact_id,
         view_ids=[view.view_id for view in ingest_result.views],
+        started_at=started_at,
         finished_at=datetime.now(UTC),
         evidence_ids=[item.evidence_id for item in evidence],
     )
