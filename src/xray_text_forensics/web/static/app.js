@@ -1,5 +1,10 @@
 "use strict";
 
+const launchUrl = new URL(window.location.href);
+if (launchUrl.searchParams.has("desktop_token")) {
+  window.history.replaceState({}, document.title, launchUrl.pathname);
+}
+
 const api = "/api/v1";
 let activeCaseId = null;
 let toastTimer = null;
