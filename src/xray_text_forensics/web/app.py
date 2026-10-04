@@ -648,6 +648,7 @@ def _oidc_client(settings: WebSettings) -> GenericOidcClient:
         issuer_url=settings.oidc_issuer_url,
         client_id=settings.oidc_client_id,
         client_secret=settings.oidc_client_secret,
+        token_auth_method=settings.oidc_token_auth_method,
     )
 
 
