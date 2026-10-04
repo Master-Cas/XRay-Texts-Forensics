@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M14 — Windows Installer Alpha**
+> Status: **M15 — Authenticode Signing-Ready**
 
 ## What XRay is
 
@@ -100,6 +100,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M12 — Production Readiness Foundation
 - M13 — Windows Desktop Alpha
 - M14 — Windows Installer Alpha
+- M15 — Authenticode Signing-Ready
 
 ## Development
 
@@ -149,7 +150,11 @@ administrator privileges under `%LOCALAPPDATA%\Programs\XRay Texts Forensics`.
 Uninstall removes the application but deliberately preserves forensic cases/evidence stored
 under `%LOCALAPPDATA%\XRay Texts Forensics`.
 
-The alpha installer is currently unsigned; Authenticode signing is a later release step.
+The alpha installer is currently unsigned, but M15 makes the Windows workflow
+Authenticode-ready. When a real signing identity is provided through GitHub secrets, the
+workflow signs and verifies both the portable EXE and the installer, and records
+`SIGNED_AUTHENTICODE` in each artifact. Without signing credentials it records
+`UNSIGNED_ALPHA` explicitly.
 
 ## License
 
