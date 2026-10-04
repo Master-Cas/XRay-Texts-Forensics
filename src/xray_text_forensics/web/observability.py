@@ -11,13 +11,14 @@ from uuid import uuid4
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _ACCESS_LOGGER = logging.getLogger("xray.web.access")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: object, *, enabled: bool = True) -> None:
+    def __init__(self, app: ASGIApp, *, enabled: bool = True) -> None:
         super().__init__(app)
         self.enabled = enabled
 
