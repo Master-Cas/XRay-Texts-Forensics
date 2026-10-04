@@ -112,6 +112,4 @@ class pytest_http_error:
     def __exit__(self, exc_type, exc, tb) -> bool:
         if not isinstance(exc, urllib.error.HTTPError):
             return False
-        if exc.code != self.status:
-            return False
-        return True
+        return exc.code == self.status
