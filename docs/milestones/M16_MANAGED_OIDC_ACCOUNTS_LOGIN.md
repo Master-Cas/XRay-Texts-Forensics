@@ -72,7 +72,8 @@ XRay verifies:
 - signature against provider JWKS;
 - permitted signing algorithm;
 - issuer;
-- audience;
+- ID-token audience;
+- independently configured access-token audience;
 - subject;
 - expiration;
 - issued-at;
@@ -182,6 +183,14 @@ XRAY_OIDC_ISSUER_URL=https://<issuer>
 XRAY_OIDC_CLIENT_ID=<client-id>
 XRAY_OIDC_CLIENT_SECRET=<secret>
 ```
+
+Provider-dependent access-token audience:
+
+```text
+XRAY_OIDC_ACCESS_TOKEN_AUDIENCE=<expected aud>
+```
+
+If omitted, it defaults to the OIDC client ID.
 
 Optional:
 
