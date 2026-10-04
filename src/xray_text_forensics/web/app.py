@@ -23,6 +23,7 @@ from xray_text_forensics.robustness import PreservationMetrics, compare_texts
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 
+from .desktop_access import DesktopAccessMiddleware
 from .jobs import JobCapacityError, JobManager
 from .models import (
     CaseBundleResponse,
@@ -73,7 +74,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="XRay Texts Forensics API",
-        version="0.11.0",
+        version="0.12.0",
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url=None,
     )
@@ -88,6 +89,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         RequestContextMiddleware,
         enabled=settings.request_logging,
     )
+    if settings.desktop_access_token is not None:
+        app.add_middleware(
+            DesktopAccessMiddleware,
+            token=settings.desktop_access_token,
+        )
     app.add_middleware(SecurityHeadersMiddleware)
 
     static_root = Path(__file__).with_name("static")
