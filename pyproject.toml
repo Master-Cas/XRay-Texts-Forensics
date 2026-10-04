@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "charset-normalizer>=3.4,<4",
     "fastapi>=0.115,<0.116",
+    "httpx>=0.27,<0.28",
     "numpy>=2.0,<3",
     "pydantic>=2.9,<3",
     "PyJWT[crypto]>=2.9,<3",
@@ -32,7 +33,6 @@ packaging = [
     "pyinstaller>=6.10,<7",
 ]
 dev = [
-    "httpx>=0.27,<0.28",
     "mypy>=1.13,<2",
     "pytest>=8.3,<9",
     "ruff>=0.7,<1",
