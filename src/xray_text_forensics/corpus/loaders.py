@@ -48,5 +48,7 @@ def _iter_supported(root: Path) -> Iterable[Path]:
     if not root.is_dir():
         raise ValueError(f"Corpus path is not a directory: {root}")
     for path in sorted(root.rglob("*")):
+        if path.name == ".xray-reference.json":
+            continue
         if path.is_file() and path.suffix.lower() in _SUPPORTED:
             yield path

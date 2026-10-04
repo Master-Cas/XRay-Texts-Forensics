@@ -22,6 +22,8 @@ from xray_text_forensics.detectors.watermark import (
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
+from xray_text_forensics.stylometry import ReferenceComparator
+from xray_text_forensics.stylometry.loaders import load_reference_root
 
 app = typer.Typer(
     name="xray",
@@ -268,3 +270,49 @@ def calibrate_scores(
     typer.echo(f"held-out FPR: {report.fpr:.6f}")
     typer.echo(f"held-out TPR: {report.tpr:.6f}")
     typer.echo(f"ROC-AUC: {report.roc_auc if report.roc_auc is not None else 'n/a'}")
+
+
+@app.command("stylometry-compare")
+def stylometry_compare(
+    suspect: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    references_root: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=False, readable=True),
+    ],
+    store: Annotated[
+        Path,
+        typer.Option("--store", help="Local content-addressed evidence store."),
+    ] = Path(".xray-store"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Compare a suspect document with versionable reference corpora."""
+
+    ingestor = _ingestor(store, 100)
+    suspect_result = ingestor.ingest_path(suspect)
+    suspect_context = analysis_context_from_ingest(suspect_result)
+    selected = suspect_context.preferred_text_view()
+    if selected is None:
+        raise typer.BadParameter("Suspect document has no usable text view")
+    _, suspect_text = selected
+
+    reference_sets, warnings = load_reference_root(references_root, ingestor)
+    comparator = ReferenceComparator(reference_sets)
+    report = comparator.compare(suspect_text)
+
+    if json_output:
+        payload = report.model_dump(mode="json")
+        payload["warnings"] = warnings
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    typer.echo("XRAY REFERENCE / STYLOMETRY COMPARISON")
+    typer.echo(f"suspect_sha256: {report.suspect_sha256}")
+    for item in report.comparisons:
+        typer.echo(
+            f"{item.label}: style={item.style_similarity:.4f} "
+            f"char_svd={item.char_svd_similarity:.4f} "
+            f"content={item.content_similarity:.4f}"
+        )
