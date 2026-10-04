@@ -424,3 +424,56 @@ def test_generic_oidc_rejects_subject_mismatch(monkeypatch) -> None:
             role_claim="role",
             allow_personal_tenant=True,
         )
+
+
+def test_access_token_can_use_independent_audience() -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": "https://identity.example",
+            "aud": "https://api.xray.example",
+            "sub": "user_123",
+            "iat": now,
+            "exp": now + 600,
+            "org_id": "org_123",
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "key-1"},
+    )
+    discovery = {
+        "issuer": "https://identity.example",
+        "jwks_uri": "https://identity.example/jwks",
+        "id_token_signing_alg_values_supported": ["RS256"],
+    }
+
+    configured = GenericOidcClient(
+        issuer_url="https://identity.example",
+        client_id="client_test",
+        client_secret="secret_test",
+        access_token_audience="https://api.xray.example",
+    )
+    configured._jwks_client = SimpleNamespace(  # type: ignore[assignment]
+        get_signing_key_from_jwt=lambda _: SimpleNamespace(key=public_key)
+    )
+    verified = configured._verify_access_token(  # noqa: SLF001
+        token,
+        discovery=discovery,
+    )
+    assert verified["org_id"] == "org_123"
+
+    default_audience = GenericOidcClient(
+        issuer_url="https://identity.example",
+        client_id="client_test",
+        client_secret="secret_test",
+    )
+    default_audience._jwks_client = SimpleNamespace(  # type: ignore[assignment]
+        get_signing_key_from_jwt=lambda _: SimpleNamespace(key=public_key)
+    )
+    with pytest.raises(OidcError, match="validation"):
+        default_audience._verify_access_token(  # noqa: SLF001
+            token,
+            discovery=discovery,
+        )
