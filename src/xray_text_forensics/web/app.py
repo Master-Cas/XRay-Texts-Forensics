@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from xray_text_forensics.cases import CaseStore
+from xray_text_forensics.cases import CaseBundle, CaseStore
 from xray_text_forensics.core import Case, DetectorRun
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
 from xray_text_forensics.graph import build_evidence_graph
-from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
+from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy, IngestResult
 from xray_text_forensics.reports import render_html_report, render_pdf_report
 from xray_text_forensics.robustness import PreservationMetrics, compare_texts
 from xray_text_forensics.runtime import analysis_context_from_ingest
@@ -47,7 +47,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         return HealthResponse()
 
     @app.post("/api/v1/ingest", response_model=IngestResponse)
-    async def ingest(file: UploadFile = File(...)) -> IngestResponse:
+    async def ingest(file: Annotated[UploadFile, File()]) -> IngestResponse:
         data, filename = await _read_upload(file, settings.max_upload_bytes)
         result = _ingestor(settings).ingest_bytes(
             data,
@@ -58,7 +58,9 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         return IngestResponse.from_domain(result)
 
     @app.post("/api/v1/analyze/unicode", response_model=UnicodeAnalysisResponse)
-    async def analyze_unicode(file: UploadFile = File(...)) -> UnicodeAnalysisResponse:
+    async def analyze_unicode(
+        file: Annotated[UploadFile, File()],
+    ) -> UnicodeAnalysisResponse:
         data, filename = await _read_upload(file, settings.max_upload_bytes)
         result = _ingestor(settings).ingest_bytes(
             data,
@@ -75,8 +77,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     @app.post("/api/v1/compare-transform", response_model=PreservationMetrics)
     async def compare_transform(
-        original: UploadFile = File(...),
-        transformed: UploadFile = File(...),
+        original: Annotated[UploadFile, File()],
+        transformed: Annotated[UploadFile, File()],
     ) -> PreservationMetrics:
         original_data, original_name = await _read_upload(
             original,
@@ -119,7 +121,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
     async def case_analyze_unicode(
         case_id: str,
-        file: UploadFile = File(...),
+        file: Annotated[UploadFile, File()],
     ) -> CaseBundleResponse:
         _bundle_or_404(settings, case_id)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
@@ -155,10 +157,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     @app.get("/api/v1/cases/{case_id}/report")
     def case_report(
         case_id: str,
-        format_name: Literal["json", "html", "pdf"] = Query(
-            default="json",
-            alias="format",
-        ),
+        format_name: Annotated[
+            Literal["json", "html", "pdf"],
+            Query(alias="format"),
+        ] = "json",
     ) -> Response:
         bundle = _bundle_or_404(settings, case_id)
         graph = build_evidence_graph(bundle)
@@ -214,15 +216,15 @@ def _ingestor(settings: WebSettings) -> ForensicIngestor:
     )
 
 
-def _best_text(result: object) -> str:
-    context = analysis_context_from_ingest(result)  # type: ignore[arg-type]
+def _best_text(result: IngestResult) -> str:
+    context = analysis_context_from_ingest(result)
     selected = context.preferred_text_view()
     if selected is None:
         raise HTTPException(status_code=422, detail="Uploaded artifact has no usable text view")
     return selected[1]
 
 
-def _bundle_or_404(settings: WebSettings, case_id: str):
+def _bundle_or_404(settings: WebSettings, case_id: str) -> CaseBundle:
     try:
         with CaseStore(settings.case_database) as store:
             return store.fetch_bundle(case_id)
