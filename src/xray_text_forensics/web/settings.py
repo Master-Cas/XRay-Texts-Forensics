@@ -43,6 +43,10 @@ class WebSettings(BaseModel):
     def case_database(self) -> Path:
         return self.data_root / "cases.sqlite"
 
+    @property
+    def auth_database(self) -> Path:
+        return self.data_root / "auth.sqlite"
+
     @classmethod
     def from_environment(cls) -> WebSettings:
         environment = os.environ.get("XRAY_ENV", "development").strip().casefold()
