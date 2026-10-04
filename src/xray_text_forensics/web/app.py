@@ -25,6 +25,14 @@ from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 
 from .desktop_access import DesktopAccessMiddleware
+from .identity import (
+    GatewayIdentityProvider,
+    IdentityBoundaryMiddleware,
+    IdentityProvider,
+    LocalIdentityProvider,
+    Principal,
+    principal_from_request,
+)
 from .jobs import JobCapacityError, JobManager
 from .models import (
     CaseBundleResponse,
@@ -37,6 +45,7 @@ from .models import (
 )
 from .observability import RequestContextMiddleware
 from .settings import WebSettings
+from .tenant_storage import TenantStorage, TenantStorageResolver
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -68,7 +77,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def create_app(settings: WebSettings | None = None) -> FastAPI:
+def create_app(
+    settings: WebSettings | None = None,
+    *,
+    identity_provider: IdentityProvider | None = None,
+) -> FastAPI:
     settings = settings or WebSettings()
     settings.data_root.mkdir(parents=True, exist_ok=True)
     settings.object_store_root.mkdir(parents=True, exist_ok=True)
@@ -80,6 +93,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.xray_settings = settings
+    if identity_provider is None:
+        identity_provider = _identity_provider(settings)
+    app.state.identity_provider = identity_provider
+    storage_resolver = TenantStorageResolver(settings.data_root)
+    app.state.tenant_storage_resolver = storage_resolver
+
     job_manager = JobManager(
         max_workers=settings.max_job_workers,
         max_pending_jobs=settings.max_pending_jobs,
@@ -95,6 +114,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             DesktopAccessMiddleware,
             token=settings.desktop_access_token,
         )
+    app.add_middleware(
+        IdentityBoundaryMiddleware,
+        provider=identity_provider,
+    )
     app.add_middleware(SecurityHeadersMiddleware)
 
     static_root = Path(__file__).with_name("static")
@@ -121,10 +144,18 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             content=response.model_dump(mode="json"),
         )
 
+    @app.get("/api/v1/session", response_model=Principal)
+    def session(request: Request) -> Principal:
+        return principal_from_request(request)
+
     @app.post("/api/v1/ingest", response_model=IngestResponse)
-    async def ingest(file: Annotated[UploadFile, File()]) -> IngestResponse:
+    async def ingest(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+    ) -> IngestResponse:
+        storage = _tenant_storage(request, storage_resolver)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -134,10 +165,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     @app.post("/api/v1/analyze/unicode", response_model=UnicodeAnalysisResponse)
     async def analyze_unicode(
+        request: Request,
         file: Annotated[UploadFile, File()],
     ) -> UnicodeAnalysisResponse:
+        storage = _tenant_storage(request, storage_resolver)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -152,9 +185,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     @app.post("/api/v1/compare-transform", response_model=PreservationMetrics)
     async def compare_transform(
+        request: Request,
         original: Annotated[UploadFile, File()],
         transformed: Annotated[UploadFile, File()],
     ) -> PreservationMetrics:
+        storage = _tenant_storage(request, storage_resolver)
         original_data, original_name = await _read_upload(
             original,
             settings.max_upload_bytes,
@@ -164,7 +199,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             settings.max_upload_bytes,
         )
         original_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 original_data,
                 filename=original_name,
                 acquisition_method="web-upload",
@@ -172,7 +207,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             )
         )
         transformed_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 transformed_data,
                 filename=transformed_name,
                 acquisition_method="web-upload",
@@ -187,9 +222,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         status_code=202,
     )
     async def submit_compare_transform(
+        request: Request,
         original: Annotated[UploadFile, File()],
         transformed: Annotated[UploadFile, File()],
     ) -> JobResponse:
+        principal = principal_from_request(request)
+        storage = _tenant_storage(request, storage_resolver)
         original_data, original_name = await _read_upload(
             original,
             settings.max_upload_bytes,
@@ -199,7 +237,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             settings.max_upload_bytes,
         )
         original_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 original_data,
                 filename=original_name,
                 acquisition_method="web-upload",
@@ -207,7 +245,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             )
         )
         transformed_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 transformed_data,
                 filename=transformed_name,
                 acquisition_method="web-upload",
@@ -222,6 +260,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             job = job_manager.submit(
                 kind="compare-transform",
                 task=task,
+                owner_tenant_id=principal.tenant_id,
                 metadata={
                     "original_filename": original_name,
                     "transformed_filename": transformed_name,
@@ -236,32 +275,40 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         return JobResponse.from_domain(job)
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
-    def get_job(job_id: str) -> JobResponse:
-        job = job_manager.get(job_id)
+    def get_job(request: Request, job_id: str) -> JobResponse:
+        principal = principal_from_request(request)
+        job = job_manager.get(
+            job_id,
+            owner_tenant_id=principal.tenant_id,
+        )
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return JobResponse.from_domain(job)
 
     @app.post("/api/v1/cases", response_model=Case)
-    def create_case(request: CaseCreateRequest) -> Case:
-        with CaseStore(settings.case_database) as store:
-            return store.create_case(request.title)
+    def create_case(request: Request, payload: CaseCreateRequest) -> Case:
+        storage = _tenant_storage(request, storage_resolver)
+        with CaseStore(storage.case_database) as store:
+            return store.create_case(payload.title)
 
     @app.get("/api/v1/cases/{case_id}", response_model=CaseBundleResponse)
-    def get_case(case_id: str) -> CaseBundleResponse:
-        return CaseBundleResponse.from_domain(_bundle_or_404(settings, case_id))
+    def get_case(request: Request, case_id: str) -> CaseBundleResponse:
+        storage = _tenant_storage(request, storage_resolver)
+        return CaseBundleResponse.from_domain(_bundle_or_404(storage, case_id))
 
     @app.post(
         "/api/v1/cases/{case_id}/analyze/unicode",
         response_model=CaseBundleResponse,
     )
     async def case_analyze_unicode(
+        request: Request,
         case_id: str,
         file: Annotated[UploadFile, File()],
     ) -> CaseBundleResponse:
-        _bundle_or_404(settings, case_id)
+        storage = _tenant_storage(request, storage_resolver)
+        _bundle_or_404(storage, case_id)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -279,7 +326,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             finished_at=datetime.now(UTC),
             evidence_ids=[item.evidence_id for item in evidence],
         )
-        with CaseStore(settings.case_database) as store:
+        with CaseStore(storage.case_database) as store:
             store.record_analysis(
                 case_id,
                 artifact=result.artifact,
@@ -292,13 +339,15 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     @app.get("/api/v1/cases/{case_id}/report")
     def case_report(
+        request: Request,
         case_id: str,
         format_name: Annotated[
             Literal["json", "html", "pdf"],
             Query(alias="format"),
         ] = "json",
     ) -> Response:
-        bundle = _bundle_or_404(settings, case_id)
+        storage = _tenant_storage(request, storage_resolver)
+        bundle = _bundle_or_404(storage, case_id)
         graph = build_evidence_graph(bundle)
 
         if format_name == "html":
@@ -345,9 +394,12 @@ async def _read_upload(upload: UploadFile, max_bytes: int) -> tuple[bytes, str]:
     return b"".join(chunks), filename
 
 
-def _ingestor(settings: WebSettings) -> ForensicIngestor:
+def _ingestor(
+    settings: WebSettings,
+    storage: TenantStorage,
+) -> ForensicIngestor:
     return ForensicIngestor(
-        ContentAddressedStore(settings.object_store_root),
+        ContentAddressedStore(storage.object_store_root),
         IngestPolicy(max_input_bytes=settings.max_upload_bytes),
     )
 
@@ -360,9 +412,9 @@ def _best_text(result: IngestResult) -> str:
     return selected[1]
 
 
-def _bundle_or_404(settings: WebSettings, case_id: str) -> CaseBundle:
+def _bundle_or_404(storage: TenantStorage, case_id: str) -> CaseBundle:
     try:
-        with CaseStore(settings.case_database) as store:
+        with CaseStore(storage.case_database) as store:
             return store.fetch_bundle(case_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Case not found") from exc
@@ -372,9 +424,29 @@ def _safe_identifier(value: str) -> str:
     return "".join(character for character in value if character.isalnum() or character in "-_")
 
 
+def _tenant_storage(
+    request: Request,
+    resolver: TenantStorageResolver,
+) -> TenantStorage:
+    return resolver.for_principal(principal_from_request(request))
+
+
+def _identity_provider(settings: WebSettings) -> IdentityProvider:
+    if settings.identity_mode == "local":
+        return LocalIdentityProvider()
+
+    secret = settings.gateway_shared_secret
+    if secret is None:
+        raise ValueError(
+            "XRAY_GATEWAY_SHARED_SECRET is required when XRAY_IDENTITY_MODE=gateway"
+        )
+    return GatewayIdentityProvider(shared_secret=secret)
+
 
 def _readiness(settings: WebSettings) -> ReadinessResponse:
-    checks: dict[str, str] = {}
+    checks: dict[str, str] = {
+        "identity_mode": settings.identity_mode,
+    }
     schema_version: int | None = None
 
     try:

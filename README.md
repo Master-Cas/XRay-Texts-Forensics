@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M14 — Windows Installer Alpha**
+> Status: **M15 — SaaS Tenant Isolation & Identity Boundary**
 
 ## What XRay is
 
@@ -100,6 +100,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M12 — Production Readiness Foundation
 - M13 — Windows Desktop Alpha
 - M14 — Windows Installer Alpha
+- M15 — SaaS Tenant Isolation & Identity Boundary
 
 ## Development
 
@@ -124,9 +125,20 @@ Operational endpoints:
 
 - `GET /api/v1/health` — process liveness
 - `GET /api/v1/ready` — database/object-store readiness
+- `GET /api/v1/session` — authenticated principal
 
-The default bind is `127.0.0.1:8080`. Production deployment still requires an
-authenticated public service boundary.
+The default bind is `127.0.0.1:8080`.
+
+Identity modes:
+
+- `local` — single-user development/Desktop compatibility
+- `gateway` — SaaS boundary behind a trusted authentication gateway
+
+Gateway mode requires `XRAY_GATEWAY_SHARED_SECRET` and authenticated identity headers
+injected by the upstream gateway. Browsers must never receive the gateway secret.
+
+Tenant case databases and object stores are physically isolated under opaque hashed
+directories. A tenant cannot fetch another tenant's cases or background jobs.
 
 ## Windows Desktop alpha
 
