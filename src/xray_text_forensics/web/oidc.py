@@ -295,11 +295,15 @@ class GenericOidcClient:
         issuer_url: str,
         client_id: str,
         client_secret: str,
+        token_auth_method: str = "client_secret_post",
         timeout_seconds: float = 8.0,
     ) -> None:
+        if token_auth_method not in {"client_secret_post", "client_secret_basic"}:
+            raise ValueError("Unsupported OIDC token endpoint auth method")
         self.issuer_url = issuer_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
+        self.token_auth_method = token_auth_method
         self.timeout_seconds = timeout_seconds
         self._discovery: dict[str, Any] | None = None
         self._jwks_client: jwt.PyJWKClient | None = None
@@ -348,16 +352,24 @@ class GenericOidcClient:
     ) -> tuple[Principal, int]:
         discovery = self._get_discovery()
         token_endpoint = str(discovery["token_endpoint"])
+        token_data: dict[str, str] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        auth: tuple[str, str] | None = None
+        if self.token_auth_method == "client_secret_post":
+            token_data["client_id"] = self.client_id
+            token_data["client_secret"] = self.client_secret
+        else:
+            auth = (self.client_id, self.client_secret)
+
         try:
             response = httpx.post(
                 token_endpoint,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "code_verifier": code_verifier,
-                },
-                auth=(self.client_id, self.client_secret),
+                data=token_data,
+                auth=auth,
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
@@ -366,19 +378,33 @@ class GenericOidcClient:
 
         payload = response.json()
         id_token = payload.get("id_token")
+        access_token = payload.get("access_token")
         if not isinstance(id_token, str) or not id_token:
             raise OidcError("OIDC provider did not return an ID token")
+        if not isinstance(access_token, str) or not access_token:
+            raise OidcError("OIDC provider did not return an access token")
 
-        claims = self._verify_id_token(
+        identity_claims = self._verify_id_token(
             id_token,
             discovery=discovery,
             expected_nonce=expected_nonce,
         )
-        subject = claims.get("sub")
+        access_claims = self._verify_access_token(
+            access_token,
+            discovery=discovery,
+        )
+
+        subject = identity_claims.get("sub")
+        access_subject = access_claims.get("sub")
         if not isinstance(subject, str) or not subject:
             raise OidcError("OIDC ID token has no valid subject")
+        if access_subject != subject:
+            raise OidcError("OIDC access token subject does not match ID token")
 
-        tenant_value = claims.get(tenant_claim)
+        tenant_value = access_claims.get(
+            tenant_claim,
+            identity_claims.get(tenant_claim),
+        )
         if isinstance(tenant_value, str) and tenant_value:
             tenant_id = tenant_value
         elif allow_personal_tenant:
@@ -386,10 +412,16 @@ class GenericOidcClient:
         else:
             raise OidcError("OIDC login is not associated with an organization")
 
-        roles = _roles_from_claim(claims.get(role_claim))
-        expires_at = claims.get("exp")
-        if not isinstance(expires_at, int):
-            raise OidcError("OIDC ID token has no valid expiration")
+        roles = _roles_from_claim(
+            access_claims.get(
+                role_claim,
+                identity_claims.get(role_claim),
+            )
+        )
+        identity_exp = identity_claims.get("exp")
+        access_exp = access_claims.get("exp")
+        if not isinstance(identity_exp, int) or not isinstance(access_exp, int):
+            raise OidcError("OIDC tokens have no valid expiration")
 
         return (
             Principal(
@@ -398,7 +430,7 @@ class GenericOidcClient:
                 roles=roles,
                 auth_method="oidc",
             ),
-            expires_at,
+            min(identity_exp, access_exp),
         )
 
     def _get_discovery(self) -> dict[str, Any]:
@@ -472,6 +504,53 @@ class GenericOidcClient:
         if authorized_party is not None and authorized_party != self.client_id:
             raise OidcError("OIDC authorized-party claim does not match client")
 
+        return dict(claims)
+
+    def _verify_access_token(
+        self,
+        token: str,
+        *,
+        discovery: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._verify_signed_token(
+            token,
+            discovery=discovery,
+            required_claims=["exp", "iat", "iss", "aud", "sub"],
+        )
+
+    def _verify_signed_token(
+        self,
+        token: str,
+        *,
+        discovery: dict[str, Any],
+        required_claims: list[str],
+    ) -> dict[str, Any]:
+        header = jwt.get_unverified_header(token)
+        algorithm = header.get("alg")
+        advertised = set(discovery.get("id_token_signing_alg_values_supported", []))
+        allowed = _SAFE_ID_TOKEN_ALGS & advertised if advertised else _SAFE_ID_TOKEN_ALGS
+        if algorithm not in allowed:
+            raise OidcError("OIDC token uses an unsupported signing algorithm")
+
+        if self._jwks_client is None:
+            self._jwks_client = jwt.PyJWKClient(
+                str(discovery["jwks_uri"]),
+                cache_keys=True,
+                lifespan=300,
+                timeout=self.timeout_seconds,
+            )
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[str(algorithm)],
+                audience=self.client_id,
+                issuer=str(discovery["issuer"]),
+                options={"require": required_claims},
+            )
+        except (jwt.PyJWTError, jwt.PyJWKClientError) as exc:
+            raise OidcError("OIDC token validation failed") from exc
         return dict(claims)
 
 
