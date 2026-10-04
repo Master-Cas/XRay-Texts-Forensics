@@ -16,6 +16,8 @@ from .models import AuditEvent, CaseBundle, Relationship
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
+CASE_SCHEMA_VERSION = 1
+
 
 class CaseStore:
     def __init__(self, path: str | Path) -> None:
@@ -25,7 +27,7 @@ class CaseStore:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=FULL")
-        self._create_schema()
+        self._migrate_schema()
 
     def __enter__(self) -> CaseStore:
         return self
@@ -41,7 +43,46 @@ class CaseStore:
         assert row is not None
         return str(row[0]).casefold()
 
-    def _create_schema(self) -> None:
+    def schema_version(self) -> int:
+        row = self.connection.execute(
+            "SELECT version FROM schema_meta WHERE singleton=1"
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Case schema version is not initialized")
+        return int(row[0])
+
+    def _migrate_schema(self) -> None:
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                version INTEGER NOT NULL
+            )
+            """
+        )
+        row = self.connection.execute(
+            "SELECT version FROM schema_meta WHERE singleton=1"
+        ).fetchone()
+        if row is not None and int(row[0]) > CASE_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Case database schema {int(row[0])} is newer than "
+                f"supported version {CASE_SCHEMA_VERSION}"
+            )
+
+        self._create_schema_v1()
+        if row is None:
+            self.connection.execute(
+                "INSERT INTO schema_meta(singleton, version) VALUES (1, ?)",
+                (CASE_SCHEMA_VERSION,),
+            )
+        elif int(row[0]) < CASE_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"No migration path from case schema {int(row[0])} "
+                f"to {CASE_SCHEMA_VERSION}"
+            )
+        self.connection.commit()
+
+    def _create_schema_v1(self) -> None:
         self.connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS cases (
@@ -83,7 +124,6 @@ class CaseStore:
             );
             """
         )
-        self.connection.commit()
 
     def create_case(self, title: str) -> Case:
         case = Case(title=title)

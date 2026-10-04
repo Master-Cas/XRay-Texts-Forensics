@@ -1,9 +1,8 @@
-"""Local development runner for the XRay web backend."""
+"""Web service runner for XRay."""
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
+import logging
 
 import uvicorn
 
@@ -12,14 +11,14 @@ from .settings import WebSettings
 
 
 def main() -> None:
-    data_root = Path(os.environ.get("XRAY_DATA_ROOT", ".xray-web-data"))
-    host = os.environ.get("XRAY_HOST", "127.0.0.1")
-    port = int(os.environ.get("XRAY_PORT", "8080"))
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings = WebSettings.from_environment()
 
-    # Local-only by default. Public deployments require an authenticated front door.
+    # Local-only by default. A public production deployment still needs an authenticated
+    # reverse proxy/service boundary before exposing this process to the Internet.
     uvicorn.run(
-        create_app(WebSettings(data_root=data_root)),
-        host=host,
-        port=port,
+        create_app(settings),
+        host=settings.bind_host,
+        port=settings.bind_port,
         log_level="info",
     )
