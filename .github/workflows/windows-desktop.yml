@@ -40,13 +40,69 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,desktop,packaging]"
 
+      - name: Probe Authenticode tooling
+        shell: pwsh
+        run: |
+          ./packaging/windows/sign-authenticode.ps1 -ProbeOnly
+
       - name: Windows-focused tests
         run: |
-          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py tests/test_runtime_paths.py tests/test_windows_installer_config.py
+          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py tests/test_runtime_paths.py tests/test_windows_installer_config.py tests/test_signing_config.py
 
       - name: Build desktop bundle
         run: |
           pyinstaller packaging/windows/xray-desktop.spec --noconfirm --clean
+
+      - name: Prepare Authenticode credentials
+        id: signing
+        shell: pwsh
+        env:
+          XRAY_SIGNING_PFX_B64: ${{ secrets.XRAY_SIGNING_PFX_B64 }}
+          XRAY_SIGNING_PFX_PASSWORD: ${{ secrets.XRAY_SIGNING_PFX_PASSWORD }}
+          XRAY_SIGNING_TIMESTAMP_URL: ${{ secrets.XRAY_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $values = @(
+            $env:XRAY_SIGNING_PFX_B64,
+            $env:XRAY_SIGNING_PFX_PASSWORD,
+            $env:XRAY_SIGNING_TIMESTAMP_URL
+          )
+          $configured = @($values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+          if ($configured -ne 0 -and $configured -ne 3) {
+            throw "Authenticode secrets are partially configured; expected all three or none"
+          }
+
+          $enabled = $configured -eq 3
+          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if ($enabled) {
+            $pfx = Join-Path $env:RUNNER_TEMP "xray-signing.pfx"
+            [IO.File]::WriteAllBytes(
+              $pfx,
+              [Convert]::FromBase64String($env:XRAY_SIGNING_PFX_B64)
+            )
+            "pfx_path=$pfx" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Sign portable executable
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          XRAY_SIGNING_PFX_PASSWORD: ${{ secrets.XRAY_SIGNING_PFX_PASSWORD }}
+          XRAY_SIGNING_TIMESTAMP_URL: ${{ secrets.XRAY_SIGNING_TIMESTAMP_URL }}
+        run: |
+          ./packaging/windows/sign-authenticode.ps1 `
+            -FilePath "dist/XRay-Texts-Forensics/XRay-Texts-Forensics.exe" `
+            -PfxPath "${{ steps.signing.outputs.pfx_path }}" `
+            -PfxPassword $env:XRAY_SIGNING_PFX_PASSWORD `
+            -TimestampUrl $env:XRAY_SIGNING_TIMESTAMP_URL
+
+      - name: Record portable signing status
+        shell: pwsh
+        run: |
+          if ("${{ steps.signing.outputs.enabled }}" -eq "true") {
+            "SIGNED_AUTHENTICODE" | Set-Content "dist/XRay-Texts-Forensics/SIGNING-STATUS.txt"
+          } else {
+            "UNSIGNED_ALPHA" | Set-Content "dist/XRay-Texts-Forensics/SIGNING-STATUS.txt"
+          }
 
       - name: Verify portable executable and checksum
         shell: pwsh
@@ -59,6 +115,7 @@ jobs:
           "$hash  XRay-Texts-Forensics.exe" | Set-Content "dist/XRay-Texts-Forensics/SHA256SUMS.txt"
           Get-Item $exe | Format-List Name,Length,FullName
           Get-Content "dist/XRay-Texts-Forensics/SHA256SUMS.txt"
+          Get-Content "dist/XRay-Texts-Forensics/SIGNING-STATUS.txt"
 
       - name: Install Inno Setup
         shell: pwsh
@@ -79,6 +136,28 @@ jobs:
           & $iscc "packaging/windows/installer.iss" "/DMyAppVersion=$version" "/DSourceDir=$source" "/DOutputDir=$output"
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Sign installer
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          XRAY_SIGNING_PFX_PASSWORD: ${{ secrets.XRAY_SIGNING_PFX_PASSWORD }}
+          XRAY_SIGNING_TIMESTAMP_URL: ${{ secrets.XRAY_SIGNING_TIMESTAMP_URL }}
+        run: |
+          ./packaging/windows/sign-authenticode.ps1 `
+            -FilePath "dist-installer/XRay-Texts-Forensics-Windows-Setup.exe" `
+            -PfxPath "${{ steps.signing.outputs.pfx_path }}" `
+            -PfxPassword $env:XRAY_SIGNING_PFX_PASSWORD `
+            -TimestampUrl $env:XRAY_SIGNING_TIMESTAMP_URL
+
+      - name: Record installer signing status
+        shell: pwsh
+        run: |
+          if ("${{ steps.signing.outputs.enabled }}" -eq "true") {
+            "SIGNED_AUTHENTICODE" | Set-Content "dist-installer/SIGNING-STATUS.txt"
+          } else {
+            "UNSIGNED_ALPHA" | Set-Content "dist-installer/SIGNING-STATUS.txt"
           }
 
       - name: Smoke install and uninstall
@@ -142,6 +221,13 @@ jobs:
           "$hash  XRay-Texts-Forensics-Windows-Setup.exe" | Set-Content "dist-installer/SHA256SUMS.txt"
           Get-Item $installer | Format-List Name,Length,FullName
           Get-Content "dist-installer/SHA256SUMS.txt"
+          Get-Content "dist-installer/SIGNING-STATUS.txt"
+
+      - name: Remove temporary signing material
+        if: always() && steps.signing.outputs.pfx_path != ''
+        shell: pwsh
+        run: |
+          Remove-Item -Path "${{ steps.signing.outputs.pfx_path }}" -Force -ErrorAction SilentlyContinue
 
       - name: Upload Windows portable alpha
         uses: actions/upload-artifact@v4
