@@ -300,6 +300,7 @@ class GenericOidcClient:
         issuer_url: str,
         client_id: str,
         client_secret: str,
+        access_token_audience: str | None = None,
         token_auth_method: str = "client_secret_post",
         timeout_seconds: float = 8.0,
     ) -> None:
@@ -308,6 +309,7 @@ class GenericOidcClient:
         self.issuer_url = issuer_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
+        self.access_token_audience = access_token_audience or client_id
         self.token_auth_method = token_auth_method
         self.timeout_seconds = timeout_seconds
         self._discovery: dict[str, Any] | None = None
@@ -474,6 +476,7 @@ class GenericOidcClient:
             token,
             discovery=discovery,
             required_claims=["exp", "iat", "iss", "aud", "sub", "nonce"],
+            audience=self.client_id,
         )
 
         nonce = claims.get("nonce")
@@ -499,6 +502,7 @@ class GenericOidcClient:
             token,
             discovery=discovery,
             required_claims=["exp", "iat", "iss", "aud", "sub"],
+            audience=self.access_token_audience,
         )
 
     def _verify_signed_token(
@@ -507,6 +511,7 @@ class GenericOidcClient:
         *,
         discovery: dict[str, Any],
         required_claims: list[str],
+        audience: str,
     ) -> dict[str, Any]:
         header = jwt.get_unverified_header(token)
         algorithm = header.get("alg")
@@ -528,7 +533,7 @@ class GenericOidcClient:
                 token,
                 signing_key.key,
                 algorithms=[str(algorithm)],
-                audience=self.client_id,
+                audience=audience,
                 issuer=str(discovery["issuer"]),
                 options={"require": required_claims},
             )
