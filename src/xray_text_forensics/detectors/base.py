@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from xray_text_forensics.core import Artifact, DerivedView, Evidence, EvidenceFamily
+from xray_text_forensics.core import Artifact, DerivedView, Evidence, EvidenceFamily, ViewKind
 
 
 class DetectorRequirements(BaseModel):
@@ -30,7 +30,17 @@ class DetectorDescriptor(BaseModel):
 class AnalysisContext(BaseModel):
     artifact: Artifact
     views: dict[str, DerivedView] = Field(default_factory=dict)
+    view_text: dict[str, str] = Field(default_factory=dict)
     resources: dict[str, Any] = Field(default_factory=dict)
+
+    def preferred_text_view(self) -> tuple[DerivedView, str] | None:
+        """Prefer raw decoded Unicode, then format-extracted text."""
+
+        for kind in (ViewKind.RAW_UNICODE, ViewKind.EXTRACTED_TEXT):
+            for view in self.views.values():
+                if view.kind is kind and view.view_id in self.view_text:
+                    return view, self.view_text[view.view_id]
+        return None
 
 
 class Detector(ABC):
