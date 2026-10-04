@@ -25,6 +25,14 @@ from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 
 from .desktop_access import DesktopAccessMiddleware
+from .identity import (
+    GatewayIdentityProvider,
+    IdentityBoundaryMiddleware,
+    IdentityProvider,
+    LocalIdentityProvider,
+    Principal,
+    principal_from_request,
+)
 from .jobs import JobCapacityError, JobManager
 from .models import (
     CaseBundleResponse,
@@ -37,6 +45,7 @@ from .models import (
 )
 from .observability import RequestContextMiddleware
 from .settings import WebSettings
+from .tenant_storage import TenantStorage, TenantStorageResolver
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -68,7 +77,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def create_app(settings: WebSettings | None = None) -> FastAPI:
+def create_app(
+    settings: WebSettings | None = None,
+    *,
+    identity_provider: IdentityProvider | None = None,
+) -> FastAPI:
     settings = settings or WebSettings()
     settings.data_root.mkdir(parents=True, exist_ok=True)
     settings.object_store_root.mkdir(parents=True, exist_ok=True)
@@ -80,6 +93,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.xray_settings = settings
+    if identity_provider is None:
+        identity_provider = _identity_provider(settings)
+    app.state.identity_provider = identity_provider
+    storage_resolver = TenantStorageResolver(settings.data_root)
+    app.state.tenant_storage_resolver = storage_resolver
+
     job_manager = JobManager(
         max_workers=settings.max_job_workers,
         max_pending_jobs=settings.max_pending_jobs,
@@ -95,6 +114,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             DesktopAccessMiddleware,
             token=settings.desktop_access_token,
         )
+    app.add_middleware(
+        IdentityBoundaryMiddleware,
+        provider=identity_provider,
+    )
     app.add_middleware(SecurityHeadersMiddleware)
 
     static_root = Path(__file__).with_name("static")
