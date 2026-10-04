@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
 from threading import Lock, Semaphore
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
