@@ -16,6 +16,7 @@ on:
       - "tests/test_web_api.py"
       - "tests/test_web_ui.py"
       - "tests/test_production_readiness.py"
+      - "tests/test_runtime_paths.py"
       - "packaging/windows/**"
       - "pyproject.toml"
       - ".github/workflows/windows-desktop.yml"
@@ -40,7 +41,7 @@ jobs:
 
       - name: Windows-focused tests
         run: |
-          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py
+          python -m pytest tests/test_desktop.py tests/test_web_api.py tests/test_web_ui.py tests/test_production_readiness.py tests/test_runtime_paths.py
 
       - name: Build desktop bundle
         run: |
