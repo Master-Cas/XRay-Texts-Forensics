@@ -54,6 +54,9 @@ class CellObservation(BaseModel):
     context_index: int = Field(ge=0)
     sample_index: int = Field(ge=0)
     choice_index: int = Field(ge=0)
+    design_sha256: str | None = None
+    raw_output: str | None = None
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class BlackBoxResult(BaseModel):

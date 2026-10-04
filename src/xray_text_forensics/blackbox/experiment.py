@@ -10,7 +10,7 @@ from .models import (
     BlackBoxSelfTestReport,
     CellObservation,
 )
-from .providers import ChoiceProvider, SyntheticChoiceProvider
+from .providers import ChoiceProvider, ProviderIdentity, SyntheticChoiceProvider
 
 
 class BlackBoxExperiment:
@@ -24,6 +24,7 @@ class BlackBoxExperiment:
         candidate_index = {
             candidate: index for index, candidate in enumerate(self.design.candidates)
         }
+        design_sha256 = self.design.fingerprint()
 
         for prefix_index, prefix in enumerate(self.design.prefixes):
             for context_index, context in enumerate(self.design.contexts):
@@ -44,15 +45,27 @@ class BlackBoxExperiment:
                             context_index=context_index,
                             sample_index=sample_index,
                             choice_index=candidate_index[choice],
+                            design_sha256=design_sha256,
+                            raw_output=choice,
                         )
                     )
         return observations
 
     def analyze(
         self,
-        provider: ChoiceProvider,
+        provider: ProviderIdentity,
         observations: list[CellObservation],
     ) -> BlackBoxResult:
+        design_sha256 = self.design.fingerprint()
+        mismatched = [
+            observation.design_sha256
+            for observation in observations
+            if observation.design_sha256 is not None
+            and observation.design_sha256 != design_sha256
+        ]
+        if mismatched:
+            raise ValueError("Observation design fingerprint does not match analysis design")
+
         counts = self._counts(observations)
         probabilities = counts / float(self.design.samples_per_cell)
         residuals = probabilities - probabilities.mean(axis=1, keepdims=True)
@@ -151,14 +164,14 @@ def blackbox_selftest(
             "Choose one option only",
         ],
         contexts=[
-            "context-731902",
-            "context-846215",
-            "context-294681",
-            "context-503728",
-            "context-918364",
-            "context-167540",
-            "context-625819",
-            "context-380476",
+            "731902846215703",
+            "846215703928164",
+            "294681503728190",
+            "503728194650281",
+            "918364205719382",
+            "167540928361704",
+            "625819304762150",
+            "380476215903681",
         ],
         candidates=["amber", "berry", "cedar", "dune"],
         samples_per_cell=samples_per_cell,
