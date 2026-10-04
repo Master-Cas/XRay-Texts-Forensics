@@ -115,6 +115,7 @@ jobs:
           "$hash  XRay-Texts-Forensics.exe" | Set-Content "dist/XRay-Texts-Forensics/SHA256SUMS.txt"
           Get-Item $exe | Format-List Name,Length,FullName
           Get-Content "dist/XRay-Texts-Forensics/SHA256SUMS.txt"
+          Get-Content "dist/XRay-Texts-Forensics/SIGNING-STATUS.txt"
 
       - name: Install Inno Setup
         shell: pwsh
