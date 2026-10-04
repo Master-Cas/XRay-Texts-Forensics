@@ -65,7 +65,7 @@ class SyntheticChoiceEndpoint:
             return 0.0
         digest = hmac.new(
             self.secret,
-            f"{context}|{choice}".encode(),
+            f"{context}|{choice}".encode("utf-8"),
             hashlib.sha256,
         ).digest()
         bit = digest[0] & 1
