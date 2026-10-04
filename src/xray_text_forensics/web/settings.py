@@ -21,6 +21,7 @@ class WebSettings(BaseModel):
     request_logging: bool = True
     bind_host: str = "127.0.0.1"
     bind_port: int = Field(default=8080, ge=1, le=65535)
+    desktop_access_token: str | None = None
 
     @property
     def object_store_root(self) -> Path:
@@ -51,6 +52,7 @@ class WebSettings(BaseModel):
             request_logging=_env_bool("XRAY_REQUEST_LOGGING", True),
             bind_host=os.environ.get("XRAY_HOST", "127.0.0.1"),
             bind_port=_env_int("XRAY_PORT", 8080),
+            desktop_access_token=os.environ.get("XRAY_DESKTOP_ACCESS_TOKEN"),
         )
 
 
