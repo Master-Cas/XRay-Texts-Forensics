@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M13 — Windows Desktop Alpha**
+> Status: **M14 — Windows Installer Alpha**
 
 ## What XRay is
 
@@ -99,6 +99,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M11 — Web UI Alpha
 - M12 — Production Readiness Foundation
 - M13 — Windows Desktop Alpha
+- M14 — Windows Installer Alpha
 
 ## Development
 
@@ -141,6 +142,14 @@ xray-desktop
 Windows CI builds a portable PyInstaller bundle and publishes it as a workflow artifact.
 The desktop backend binds only to loopback and protects private UI/API routes with an
 ephemeral per-launch session token.
+
+M14 also builds a per-user Windows installer with Inno Setup. It installs without
+administrator privileges under `%LOCALAPPDATA%\Programs\XRay Texts Forensics`.
+
+Uninstall removes the application but deliberately preserves forensic cases/evidence stored
+under `%LOCALAPPDATA%\XRay Texts Forensics`.
+
+The alpha installer is currently unsigned; Authenticode signing is a later release step.
 
 ## License
 
