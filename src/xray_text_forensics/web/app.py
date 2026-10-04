@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
 
 from xray_text_forensics.cases import CaseBundle, CaseStore
 from xray_text_forensics.core import Case, DetectorRun
@@ -29,6 +32,35 @@ from .models import (
 from .settings import WebSettings
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Apply conservative browser headers to the product UI and API."""
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        if not request.url.path.startswith("/docs"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self'; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "font-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'none'; "
+                "frame-ancestors 'none'; "
+                "form-action 'self'"
+            )
+        return response
+
+
 def create_app(settings: WebSettings | None = None) -> FastAPI:
     settings = settings or WebSettings()
     settings.data_root.mkdir(parents=True, exist_ok=True)
@@ -41,6 +73,18 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.xray_settings = settings
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    static_root = Path(__file__).with_name("static")
+    app.mount("/static", StaticFiles(directory=static_root), name="static")
+
+    @app.get("/", include_in_schema=False)
+    def web_ui() -> FileResponse:
+        return FileResponse(
+            static_root / "index.html",
+            media_type="text/html",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     def health() -> HealthResponse:
