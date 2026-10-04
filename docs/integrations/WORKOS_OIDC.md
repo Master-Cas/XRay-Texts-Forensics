@@ -38,6 +38,9 @@ XRAY_OIDC_ISSUER_URL=https://your-domain.authkit.app
 XRAY_OIDC_CLIENT_ID=<workos-oauth-application-client-id>
 XRAY_OIDC_CLIENT_SECRET=<workos-oauth-application-client-secret>
 
+# Configure this if the WorkOS access-token aud differs from the OAuth app client ID.
+XRAY_OIDC_ACCESS_TOKEN_AUDIENCE=<expected-access-token-audience>
+
 XRAY_OIDC_SCOPES="openid profile email"
 XRAY_OIDC_TENANT_CLAIM=org_id
 XRAY_OIDC_TOKEN_AUTH_METHOD=client_secret_post
@@ -50,6 +53,23 @@ Use your deployment platform's secret manager for:
 ```text
 XRAY_OIDC_CLIENT_SECRET
 ```
+
+## Access-token audience
+
+XRay validates the ID token against `XRAY_OIDC_CLIENT_ID`.
+
+The access token has an independent audience check. WorkOS Connect documents that the
+access-token `aud` is the requested resource indicator, or the environment client ID when
+no resource is requested.
+
+Set:
+
+```bash
+XRAY_OIDC_ACCESS_TOKEN_AUDIENCE=<expected aud>
+```
+
+If omitted, XRay conservatively expects the OAuth client ID. A mismatched audience fails
+closed.
 
 ## Organization mapping
 
