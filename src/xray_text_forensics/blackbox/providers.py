@@ -82,13 +82,13 @@ class SyntheticChoiceProvider:
 
     def _prefix_logit(self, prefix: str, candidate: str) -> float:
         digest = hashlib.sha256(
-            f"{self.seed}|prefix|{prefix}|{candidate}".encode("utf-8")
+            f"{self.seed}|prefix|{prefix}|{candidate}".encode()
         ).digest()
         unit = int.from_bytes(digest[:8], "big") / float(1 << 64)
         return (unit - 0.5) * 1.6
 
     def _favored_candidate(self, context: str, candidate_count: int) -> int:
-        digest = hmac.new(self.key, context.encode("utf-8"), hashlib.sha256).digest()
+        digest = hmac.new(self.key, context.encode(), hashlib.sha256).digest()
         return int.from_bytes(digest[:8], "big") % candidate_count
 
     def _draw(self, prefix: str, context: str, sample_index: int) -> float:
@@ -96,7 +96,7 @@ class SyntheticChoiceProvider:
             (
                 f"{self.seed}|draw|{prefix}|{context}|{sample_index}|"
                 f"{int(self.watermark_on)}"
-            ).encode("utf-8")
+            ).encode()
         ).digest()
         return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
