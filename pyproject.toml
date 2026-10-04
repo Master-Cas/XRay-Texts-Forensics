@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xray-texts-forensics"
-version = "0.6.0"
+version = "0.7.0"
 description = "Evidence-driven text forensics platform for watermark, linguistic, provenance, and AI-text auditing."
 readme = "README.md"
 requires-python = ">=3.12"

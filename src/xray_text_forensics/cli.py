@@ -9,6 +9,8 @@ from typing import Annotated
 
 import typer
 
+from xray_text_forensics.blackbox import analyze_observations, run_synthetic_validation
+from xray_text_forensics.blackbox.io import load_observations_jsonl
 from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
 from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.cases import CaseStore
@@ -424,3 +426,62 @@ def case_report(
         raise typer.BadParameter("format must be json, html, or pdf")
 
     typer.echo(str(output))
+
+
+@app.command("blackbox-analyze")
+def blackbox_analyze(
+    observations: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    permutations: Annotated[
+        int,
+        typer.Option("--permutations", min=99, help="Within-prefix permutation count."),
+    ] = 999,
+    seed: Annotated[int, typer.Option("--seed")] = 0,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Analyze collected forced-choice observations for context-keyed association."""
+
+    rows = load_observations_jsonl(observations)
+    result = analyze_observations(rows, permutations=permutations, seed=seed)
+
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY BLACK-BOX WATERMARK ANALYSIS")
+    typer.echo(f"valid observations: {result.valid_observations}")
+    typer.echo(f"within-prefix statistic: {result.statistic:.6f}")
+    typer.echo(f"permutation p-value: {result.p_value:.6g}")
+    typer.echo(f"association index: {result.association_index:.6f}")
+    typer.echo(result.interpretation)
+
+
+@app.command("blackbox-validate")
+def blackbox_validate(
+    permutations: Annotated[
+        int,
+        typer.Option("--permutations", min=99),
+    ] = 499,
+    seed: Annotated[int, typer.Option("--seed")] = 314159,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate the black-box method on the same synthetic model with watermark OFF/ON."""
+
+    validation = run_synthetic_validation(permutations=permutations, seed=seed)
+
+    if json_output:
+        typer.echo(validation.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY BLACK-BOX CONTROLLED VALIDATION")
+    typer.echo(
+        f"OFF: statistic={validation.off_result.statistic:.4f} "
+        f"p={validation.off_result.p_value:.6g}"
+    )
+    typer.echo(
+        f"ON:  statistic={validation.on_result.statistic:.4f} "
+        f"p={validation.on_result.p_value:.6g}"
+    )
+    typer.echo(f"gate: {'PASS' if validation.passed else 'FAIL'}")
