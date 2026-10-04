@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 
+from xray_text_forensics import __version__
 from xray_text_forensics.cases import CaseBundle, CaseStore
 from xray_text_forensics.core import Case, DetectorRun
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
@@ -74,7 +75,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="XRay Texts Forensics API",
-        version="0.12.0",
+        version=__version__,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url=None,
     )
