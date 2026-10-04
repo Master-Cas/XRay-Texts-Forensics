@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -22,13 +23,17 @@ from xray_text_forensics.robustness import PreservationMetrics, compare_texts
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 
+from .jobs import JobCapacityError, JobManager
 from .models import (
     CaseBundleResponse,
     CaseCreateRequest,
     HealthResponse,
     IngestResponse,
+    JobResponse,
+    ReadinessResponse,
     UnicodeAnalysisResponse,
 )
+from .observability import RequestContextMiddleware
 from .settings import WebSettings
 
 
@@ -68,11 +73,21 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="XRay Texts Forensics API",
-        version="0.9.0",
+        version="0.11.0",
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url=None,
     )
     app.state.xray_settings = settings
+    job_manager = JobManager(
+        max_workers=settings.max_job_workers,
+        max_pending_jobs=settings.max_pending_jobs,
+    )
+    app.state.job_manager = job_manager
+    app.add_event_handler("shutdown", job_manager.shutdown)
+    app.add_middleware(
+        RequestContextMiddleware,
+        enabled=settings.request_logging,
+    )
     app.add_middleware(SecurityHeadersMiddleware)
 
     static_root = Path(__file__).with_name("static")
@@ -89,6 +104,15 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     @app.get("/api/v1/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse()
+
+    @app.get("/api/v1/ready", response_model=None)
+    def ready() -> JSONResponse:
+        response = _readiness(settings)
+        status_code = 200 if response.status == "ready" else 503
+        return JSONResponse(
+            status_code=status_code,
+            content=response.model_dump(mode="json"),
+        )
 
     @app.post("/api/v1/ingest", response_model=IngestResponse)
     async def ingest(file: Annotated[UploadFile, File()]) -> IngestResponse:
@@ -149,6 +173,67 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             )
         )
         return compare_texts(original_text, transformed_text)
+
+    @app.post(
+        "/api/v1/jobs/compare-transform",
+        response_model=JobResponse,
+        status_code=202,
+    )
+    async def submit_compare_transform(
+        original: Annotated[UploadFile, File()],
+        transformed: Annotated[UploadFile, File()],
+    ) -> JobResponse:
+        original_data, original_name = await _read_upload(
+            original,
+            settings.max_upload_bytes,
+        )
+        transformed_data, transformed_name = await _read_upload(
+            transformed,
+            settings.max_upload_bytes,
+        )
+        original_text = _best_text(
+            _ingestor(settings).ingest_bytes(
+                original_data,
+                filename=original_name,
+                acquisition_method="web-upload",
+                source_declared="web-upload",
+            )
+        )
+        transformed_text = _best_text(
+            _ingestor(settings).ingest_bytes(
+                transformed_data,
+                filename=transformed_name,
+                acquisition_method="web-upload",
+                source_declared="web-upload",
+            )
+        )
+
+        def task() -> dict[str, object]:
+            return compare_texts(original_text, transformed_text).model_dump(mode="json")
+
+        try:
+            job = job_manager.submit(
+                kind="compare-transform",
+                task=task,
+                metadata={
+                    "original_filename": original_name,
+                    "transformed_filename": transformed_name,
+                },
+            )
+        except JobCapacityError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Background job capacity is full",
+                headers={"Retry-After": "2"},
+            ) from exc
+        return JobResponse.from_domain(job)
+
+    @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
+    def get_job(job_id: str) -> JobResponse:
+        job = job_manager.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return JobResponse.from_domain(job)
 
     @app.post("/api/v1/cases", response_model=Case)
     def create_case(request: CaseCreateRequest) -> Case:
@@ -278,3 +363,45 @@ def _bundle_or_404(settings: WebSettings, case_id: str) -> CaseBundle:
 
 def _safe_identifier(value: str) -> str:
     return "".join(character for character in value if character.isalnum() or character in "-_")
+
+
+
+def _readiness(settings: WebSettings) -> ReadinessResponse:
+    checks: dict[str, str] = {}
+    schema_version: int | None = None
+
+    try:
+        with CaseStore(settings.case_database) as store:
+            schema_version = store.schema_version()
+            checks["database"] = "ok"
+            checks["journal_mode"] = store.journal_mode()
+    except Exception:
+        checks["database"] = "error"
+
+    probe = settings.object_store_root / f".ready-{uuid4().hex}"
+    try:
+        settings.object_store_root.mkdir(parents=True, exist_ok=True)
+        probe.write_bytes(b"xray-ready")
+        if probe.read_bytes() != b"xray-ready":
+            raise OSError("readiness probe mismatch")
+        checks["object_store"] = "ok"
+    except OSError:
+        checks["object_store"] = "error"
+    finally:
+        try:
+            probe.unlink(missing_ok=True)
+        except OSError:
+            checks["object_store_cleanup"] = "error"
+
+    required_ok = (
+        checks.get("database") == "ok"
+        and checks.get("journal_mode") == "wal"
+        and checks.get("object_store") == "ok"
+        and "object_store_cleanup" not in checks
+    )
+    return ReadinessResponse(
+        status="ready" if required_ok else "not_ready",
+        checks=checks,
+        schema_version=schema_version,
+        environment=settings.environment,
+    )
