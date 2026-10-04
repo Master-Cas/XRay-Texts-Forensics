@@ -65,7 +65,23 @@ ORIGINAL ARTIFACT
       REPORT            API
 ```
 
-See [Master Architecture V1](docs/architecture/MASTER_ARCHITECTURE_V1.md) and the [Scientific Contract](docs/methodology/SCIENTIFIC_CONTRACT.md).
+See [Master Architecture V1](docs/architecture/MASTER_ARCHITECTURE_V1.md), [ADR-001 — Platform Strategy](docs/architecture/ADR-001-PLATFORM-STRATEGY.md), and the [Scientific Contract](docs/methodology/SCIENTIFIC_CONTRACT.md).
+
+## Platform strategy
+
+XRay is a **multiplatform engine whose primary product is Web**.
+
+Current priority:
+
+1. Core Python + CLI — required
+2. Web / SaaS — primary product
+3. Windows Desktop — required
+4. macOS Desktop — planned target, pending packaging validation
+5. Linux Desktop — secondary / best-effort
+6. Enterprise/on-premise — future
+7. Android/iOS native — future decision; Web/PWA covers mobile initially
+
+All product surfaces use the same scientific Core. Detector semantics are never reimplemented per platform.
 
 ## Development roadmap
 
