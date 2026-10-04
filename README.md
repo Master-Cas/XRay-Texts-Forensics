@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M15 — SaaS Tenant Isolation & Identity Boundary**
+> Status: **M16 — Managed OIDC Accounts & Login**
 
 ## What XRay is
 
@@ -101,6 +101,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M13 — Windows Desktop Alpha
 - M14 — Windows Installer Alpha
 - M15 — SaaS Tenant Isolation & Identity Boundary
+- M16 — Managed OIDC Accounts & Login
 
 ## Development
 
@@ -133,9 +134,18 @@ Identity modes:
 
 - `local` — single-user development/Desktop compatibility
 - `gateway` — SaaS boundary behind a trusted authentication gateway
+- `oidc` — managed identity using standards-based OIDC Authorization Code + PKCE
 
 Gateway mode requires `XRAY_GATEWAY_SHARED_SECRET` and authenticated identity headers
 injected by the upstream gateway. Browsers must never receive the gateway secret.
+
+OIDC mode uses a server-side BFF session. The browser receives only an opaque HttpOnly
+cookie; provider access/ID tokens and client secrets are never stored in JavaScript or
+Local Storage.
+
+The initial managed provider is WorkOS AuthKit, but XRay consumes standard OIDC discovery,
+JWKS, issuer/audience validation, PKCE, and configurable claims so the forensic Core remains
+provider-independent.
 
 Tenant case databases and object stores are physically isolated under opaque hashed
 directories. A tenant cannot fetch another tenant's cases or background jobs.
