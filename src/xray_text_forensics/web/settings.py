@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,8 @@ class WebSettings(BaseModel):
         if environment not in {"development", "test", "production"}:
             raise ValueError("XRAY_ENV must be development, test, or production")
 
-        docs_default = environment != "production"
+        environment_name = cast(EnvironmentName, environment)
+        docs_default = environment_name != "production"
         return cls(
             data_root=Path(os.environ.get("XRAY_DATA_ROOT", ".xray-web-data")),
             max_upload_bytes=_env_int(
@@ -44,7 +45,7 @@ class WebSettings(BaseModel):
                 25 * 1024 * 1024,
             ),
             docs_enabled=_env_bool("XRAY_DOCS_ENABLED", docs_default),
-            environment=environment,
+            environment=environment_name,
             max_job_workers=_env_int("XRAY_MAX_JOB_WORKERS", 2),
             max_pending_jobs=_env_int("XRAY_MAX_PENDING_JOBS", 8),
             request_logging=_env_bool("XRAY_REQUEST_LOGGING", True),
