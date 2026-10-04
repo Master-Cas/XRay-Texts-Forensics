@@ -11,6 +11,12 @@ import typer
 from xray_text_forensics.corpus import CorpusEngine
 from xray_text_forensics.corpus.loaders import load_directory
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
+from xray_text_forensics.detectors.watermark import (
+    EnvironmentSecretProvider,
+    RedGreenConfig,
+    ReferenceRedGreenDetector,
+    StableWordTokenizer,
+)
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
@@ -144,3 +150,60 @@ def compare_corpora(
             f"  {row.term:<24} chi2={row.chi_square:8.3f} "
             f"log2FC={row.log2_fold_change_a_over_b:+7.3f} -> {row.direction}"
         )
+
+
+@app.command("watermark-redgreen")
+def watermark_redgreen(
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    key_env: Annotated[
+        str,
+        typer.Option("--key-env", help="Environment variable containing the secret key."),
+    ],
+    store: Annotated[
+        Path,
+        typer.Option("--store", help="Local content-addressed evidence store."),
+    ] = Path(".xray-store"),
+    threshold_z: Annotated[
+        float,
+        typer.Option("--threshold-z", help="Detection z-score threshold."),
+    ] = 4.0,
+    min_tokens: Annotated[
+        int,
+        typer.Option("--min-tokens", min=1, help="Minimum scored tokens."),
+    ] = 50,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Score the reference known-key red/green watermark detector."""
+
+    ingest_result = _ingestor(store, 100).ingest_path(path)
+    context = analysis_context_from_ingest(ingest_result)
+    context.resources.update(
+        {
+            "secret_provider": EnvironmentSecretProvider(),
+            "secret_ref": key_env,
+            "watermark_tokenizer": StableWordTokenizer(),
+        }
+    )
+    detector = ReferenceRedGreenDetector(
+        RedGreenConfig(threshold_z=threshold_z, min_scored_tokens=min_tokens)
+    )
+    evidence = detector.analyze(context)
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {"evidence": [item.model_dump(mode="json") for item in evidence]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    item = evidence[0]
+    typer.echo("XRAY KNOWN-KEY WATERMARK")
+    typer.echo(f"status: {item.status}")
+    typer.echo(f"finding: {item.finding}")
+    if "z_score" in item.parameters:
+        typer.echo(f"z_score: {item.parameters['z_score']:.4f}")
+    if item.reason:
+        typer.echo(f"reason: {item.reason}")
