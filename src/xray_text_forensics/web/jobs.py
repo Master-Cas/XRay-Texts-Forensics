@@ -22,6 +22,7 @@ class JobStatus(StrEnum):
 
 class JobRecord(BaseModel):
     job_id: str
+    owner_tenant_id: str
     kind: str
     status: JobStatus
     created_at: datetime
@@ -60,6 +61,7 @@ class JobManager:
         kind: str,
         task: Callable[[], dict[str, Any]],
         metadata: dict[str, Any] | None = None,
+        owner_tenant_id: str = "local",
     ) -> JobRecord:
         if self._closed:
             raise RuntimeError("Job manager is closed")
@@ -68,6 +70,7 @@ class JobManager:
 
         record = JobRecord(
             job_id=f"job_{uuid4().hex}",
+            owner_tenant_id=owner_tenant_id,
             kind=kind,
             status=JobStatus.PENDING,
             created_at=datetime.now(UTC),
@@ -88,10 +91,17 @@ class JobManager:
             self._futures[record.job_id] = future
         return record.model_copy(deep=True)
 
-    def get(self, job_id: str) -> JobRecord | None:
+    def get(
+        self,
+        job_id: str,
+        *,
+        owner_tenant_id: str = "local",
+    ) -> JobRecord | None:
         with self._lock:
             record = self._records.get(job_id)
-            return record.model_copy(deep=True) if record else None
+            if record is None or record.owner_tenant_id != owner_tenant_id:
+                return None
+            return record.model_copy(deep=True)
 
     def shutdown(self) -> None:
         self._closed = True
