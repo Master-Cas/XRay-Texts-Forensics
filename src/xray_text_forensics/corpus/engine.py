@@ -212,7 +212,10 @@ class CorpusEngine:
                 )
             )
 
-        results.sort(key=lambda item: (item.chi_square, abs(item.log2_fold_change_a_over_b)), reverse=True)
+        results.sort(
+            key=lambda item: (item.chi_square, abs(item.log2_fold_change_a_over_b)),
+            reverse=True,
+        )
         return results[:top_n]
 
 
