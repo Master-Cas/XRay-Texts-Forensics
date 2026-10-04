@@ -35,7 +35,7 @@ def test_plain_text_preserves_exact_original_and_creates_views(tmp_path) -> None
     assert result.artifact.sha256
     assert result.artifact.byte_length == len(original)
     assert result.artifact.media_type == "text/plain"
-    assert result.artifact.detected_encoding == "utf_8"
+    assert result.artifact.detected_encoding == "utf-8"
     assert {view.kind for view in result.views} == {
         ViewKind.RAW_UNICODE,
         ViewKind.EXTRACTED_TEXT,
