@@ -17,6 +17,38 @@ function setHealth(ok) {
   badge.className = ok ? "status status-good" : "status status-bad";
 }
 
+function setSessionState(principal) {
+  const badge = $("session-badge");
+  const signIn = $("signin-link");
+  const signOut = $("logout-link");
+
+  if (!principal) {
+    badge.hidden = true;
+    signIn.hidden = false;
+    signOut.hidden = true;
+    return;
+  }
+
+  badge.textContent = principal.subject_id + " · " + principal.tenant_id;
+  badge.className = "status status-good";
+  badge.hidden = false;
+  signIn.hidden = true;
+  signOut.hidden = principal.auth_method !== "oidc";
+}
+
+async function loadSession() {
+  const response = await fetch(api + "/session");
+  if (response.status === 401) {
+    setSessionState(null);
+    return;
+  }
+  if (!response.ok) {
+    setSessionState(null);
+    return;
+  }
+  setSessionState(await response.json());
+}
+
 function toast(message) {
   const element = $("toast");
   element.textContent = message;
@@ -309,3 +341,5 @@ $("compare-form").addEventListener("submit", async (event) => {
 jsonRequest(api + "/health")
   .then(() => setHealth(true))
   .catch(() => setHealth(false));
+
+loadSession().catch(() => setSessionState(null));
