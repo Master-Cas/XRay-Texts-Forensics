@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M0 — Foundation & Scientific Contract**
+> Status: **M12 — Production Readiness Foundation**
 
 ## What XRay is
 
@@ -94,7 +94,10 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M6 — Reference Corpus & Stylometry
 - M7 — Evidence Graph & Reporting
 - M8 — Black-Box Audit Lab
-- M9 — Adversarial Lab
+- M9 — Adversarial Robustness Lab
+- M10 — Web Backend MVP
+- M11 — Web UI Alpha
+- M12 — Production Readiness Foundation
 
 ## Development
 
@@ -102,10 +105,26 @@ Requires Python 3.12+.
 
 ```bash
 python -m pip install -e ".[dev]"
-pytest
-ruff check .
-mypy src
+python -m pytest
+python -m ruff check .
+python -m mypy src
 ```
+
+## Web service
+
+Local development:
+
+```bash
+xray-web
+```
+
+Operational endpoints:
+
+- `GET /api/v1/health` — process liveness
+- `GET /api/v1/ready` — database/object-store readiness
+
+The default bind is `127.0.0.1:8080`. Production deployment still requires an
+authenticated public service boundary.
 
 ## License
 
