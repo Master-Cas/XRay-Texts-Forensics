@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M12 — Production Readiness Foundation**
+> Status: **M13 — Windows Desktop Alpha**
 
 ## What XRay is
 
@@ -98,6 +98,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M10 — Web Backend MVP
 - M11 — Web UI Alpha
 - M12 — Production Readiness Foundation
+- M13 — Windows Desktop Alpha
 
 ## Development
 
@@ -125,6 +126,21 @@ Operational endpoints:
 
 The default bind is `127.0.0.1:8080`. Production deployment still requires an
 authenticated public service boundary.
+
+## Windows Desktop alpha
+
+The desktop product reuses the same Web/API/Core stack inside a native window.
+
+Development install:
+
+```bash
+python -m pip install -e ".[desktop]"
+xray-desktop
+```
+
+Windows CI builds a portable PyInstaller bundle and publishes it as a workflow artifact.
+The desktop backend binds only to loopback and protects private UI/API routes with an
+ephemeral per-launch session token.
 
 ## License
 
