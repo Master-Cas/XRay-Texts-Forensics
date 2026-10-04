@@ -32,6 +32,7 @@ from xray_text_forensics.detectors.watermark import (
 from xray_text_forensics.graph import build_evidence_graph
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
 from xray_text_forensics.reports import render_html_report, render_json_report, render_pdf_report
+from xray_text_forensics.robustness import compare_texts, run_reference_watermark_stress
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 from xray_text_forensics.stylometry import ReferenceComparator
@@ -507,3 +508,84 @@ def blackbox_analyze_command(
     typer.echo(f"statistic: {result.statistic:.8f}")
     typer.echo(f"p_value: {result.p_value:.8f}")
     typer.echo(f"significant: {result.significant}")
+
+
+@app.command("watermark-stress")
+def watermark_stress_command(
+    path: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    key_env: Annotated[
+        str,
+        typer.Option("--key-env", help="Environment variable containing the reference key."),
+    ],
+    threshold_z: Annotated[
+        float,
+        typer.Option("--threshold-z"),
+    ] = 4.0,
+    min_tokens: Annotated[
+        int,
+        typer.Option("--min-tokens", min=1),
+    ] = 50,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Measure known-key reference watermark robustness under controlled edits."""
+
+    secret = EnvironmentSecretProvider().get_secret(key_env)
+    if not secret:
+        raise typer.BadParameter(f"Secret reference {key_env!r} could not be resolved")
+
+    text = path.read_text(encoding="utf-8")
+    report = run_reference_watermark_stress(
+        text,
+        secret=secret,
+        threshold_z=threshold_z,
+        min_scored_tokens=min_tokens,
+    )
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY WATERMARK ROBUSTNESS LAB")
+    typer.echo(
+        f"baseline: {report.baseline.status} z={report.baseline.z_score:.4f} "
+        f"scored={report.baseline.scored_tokens}"
+    )
+    for result in report.results:
+        typer.echo(
+            f"{result.transform_id}: {result.measurement.status} "
+            f"z={result.measurement.z_score:.4f} "
+            f"5gram={result.preservation.fivegram_survival:.3f} "
+            f"tfidf={result.preservation.lexical_tfidf_cosine:.3f}"
+        )
+
+
+@app.command("compare-transform")
+def compare_transform_command(
+    original: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    transformed: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Measure lexical/sequence preservation between an original and edited text."""
+
+    metrics = compare_texts(
+        original.read_text(encoding="utf-8"),
+        transformed.read_text(encoding="utf-8"),
+    )
+    if json_output:
+        typer.echo(metrics.model_dump_json(indent=2))
+        return
+
+    typer.echo("XRAY TEXT TRANSFORM COMPARISON")
+    typer.echo(f"token_jaccard: {metrics.token_jaccard:.6f}")
+    typer.echo(f"sequence_ratio: {metrics.token_sequence_ratio:.6f}")
+    typer.echo(f"fivegram_survival: {metrics.fivegram_survival:.6f}")
+    typer.echo(f"lexical_tfidf_cosine: {metrics.lexical_tfidf_cosine:.6f}")
