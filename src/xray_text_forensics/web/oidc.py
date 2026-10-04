@@ -93,6 +93,11 @@ class OidcSessionStore:
         with self._lock:
             self.connection.close()
 
+    def journal_mode(self) -> str:
+        with self._lock:
+            row = self.connection.execute("PRAGMA journal_mode").fetchone()
+        return str(row[0]).casefold() if row else ""
+
     def store_pending(
         self,
         *,
