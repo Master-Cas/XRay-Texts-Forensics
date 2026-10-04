@@ -33,6 +33,14 @@ def decode_text(data: bytes) -> DecodedText:
     if not data:
         return DecodedText("", "utf-8")
 
+    # Forensic rule: valid UTF-8 is never handed to a heuristic detector. Heuristic
+    # misclassification could transform or erase exactly the invisible codepoints that
+    # Unicode forensics is meant to inspect.
+    try:
+        return DecodedText(data.decode("utf-8", errors="strict"), "utf-8")
+    except UnicodeDecodeError:
+        pass
+
     match = from_bytes(data).best()
     if match is None or match.encoding is None:
         raise UnicodeError("Unable to determine a safe text encoding")
