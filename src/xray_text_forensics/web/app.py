@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hmac
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -47,13 +47,13 @@ from .models import (
 )
 from .observability import RequestContextMiddleware
 from .oidc import (
+    SESSION_COOKIE,
+    STATE_COOKIE,
     GenericOidcClient,
     OidcClientProtocol,
     OidcError,
     OidcSessionIdentityProvider,
     OidcSessionStore,
-    SESSION_COOKIE,
-    STATE_COOKIE,
 )
 from .settings import WebSettings
 from .tenant_storage import TenantStorage, TenantStorageResolver
