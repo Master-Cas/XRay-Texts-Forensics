@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hmac
+import time
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -44,6 +46,15 @@ from .models import (
     UnicodeAnalysisResponse,
 )
 from .observability import RequestContextMiddleware
+from .oidc import (
+    GenericOidcClient,
+    OidcClientProtocol,
+    OidcError,
+    OidcSessionIdentityProvider,
+    OidcSessionStore,
+    SESSION_COOKIE,
+    STATE_COOKIE,
+)
 from .settings import WebSettings
 from .tenant_storage import TenantStorage, TenantStorageResolver
 
@@ -81,6 +92,7 @@ def create_app(
     settings: WebSettings | None = None,
     *,
     identity_provider: IdentityProvider | None = None,
+    oidc_client: OidcClientProtocol | None = None,
 ) -> FastAPI:
     settings = settings or WebSettings()
     settings.data_root.mkdir(parents=True, exist_ok=True)
@@ -93,9 +105,22 @@ def create_app(
         redoc_url=None,
     )
     app.state.xray_settings = settings
-    if identity_provider is None:
+    oidc_store: OidcSessionStore | None = None
+    if settings.identity_mode == "oidc":
+        _validate_oidc_settings(settings)
+        oidc_store = OidcSessionStore(settings.auth_database)
+        if oidc_client is None:
+            oidc_client = _oidc_client(settings)
+        if identity_provider is None:
+            identity_provider = OidcSessionIdentityProvider(oidc_store)
+        app.add_event_handler("shutdown", oidc_store.close)
+    elif identity_provider is None:
         identity_provider = _identity_provider(settings)
+
+    assert identity_provider is not None
     app.state.identity_provider = identity_provider
+    app.state.oidc_store = oidc_store
+    app.state.oidc_client = oidc_client
     storage_resolver = TenantStorageResolver(settings.data_root)
     app.state.tenant_storage_resolver = storage_resolver
 
@@ -130,6 +155,107 @@ def create_app(
             media_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/auth/login", include_in_schema=False)
+    def oidc_login(
+        return_to: str = "/",
+    ) -> Response:
+        if settings.identity_mode != "oidc" or oidc_store is None or oidc_client is None:
+            raise HTTPException(status_code=404, detail="OIDC login is not enabled")
+
+        redirect_uri = _oidc_redirect_uri(settings)
+        start = oidc_client.authorization_start(
+            redirect_uri=redirect_uri,
+            scopes=settings.oidc_scopes,
+        )
+        pending = oidc_store.store_pending(
+            start=start,
+            return_to=return_to,
+        )
+        response = RedirectResponse(start.url, status_code=302)
+        response.set_cookie(
+            STATE_COOKIE,
+            pending.state,
+            max_age=600,
+            httponly=True,
+            secure=_secure_oidc_cookie(settings),
+            samesite="lax",
+            path="/auth",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/auth/callback", include_in_schema=False)
+    def oidc_callback(
+        request: Request,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+    ) -> Response:
+        if settings.identity_mode != "oidc" or oidc_store is None or oidc_client is None:
+            raise HTTPException(status_code=404, detail="OIDC login is not enabled")
+        if error is not None:
+            raise HTTPException(status_code=401, detail="OIDC authentication failed")
+        if not code or not state:
+            raise HTTPException(status_code=400, detail="OIDC callback is incomplete")
+
+        cookie_state = request.cookies.get(STATE_COOKIE)
+        if cookie_state is None or not hmac.compare_digest(cookie_state, state):
+            raise HTTPException(status_code=400, detail="OIDC state validation failed")
+
+        pending = oidc_store.consume_pending(state)
+        if pending is None:
+            raise HTTPException(status_code=400, detail="OIDC authorization state expired")
+
+        try:
+            principal, token_expires_at = oidc_client.complete(
+                code=code,
+                redirect_uri=_oidc_redirect_uri(settings),
+                code_verifier=pending.code_verifier,
+                expected_nonce=pending.nonce,
+                tenant_claim=settings.oidc_tenant_claim,
+                role_claim=settings.oidc_role_claim,
+                allow_personal_tenant=settings.oidc_allow_personal_tenant,
+            )
+        except OidcError as exc:
+            raise HTTPException(status_code=401, detail="OIDC authentication failed") from exc
+
+        now = int(time.time())
+        session_expires_at = min(
+            token_expires_at,
+            now + settings.oidc_session_ttl_seconds,
+        )
+        session = oidc_store.create_session(
+            principal=principal,
+            expires_at=session_expires_at,
+        )
+        response = RedirectResponse(pending.return_to, status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE,
+            session.session_id,
+            max_age=max(1, session.expires_at - now),
+            httponly=True,
+            secure=_secure_oidc_cookie(settings),
+            samesite="lax",
+            path="/",
+        )
+        response.delete_cookie(STATE_COOKIE, path="/auth")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/auth/logout", include_in_schema=False)
+    def oidc_logout(request: Request) -> Response:
+        if settings.identity_mode != "oidc" or oidc_store is None:
+            return RedirectResponse("/", status_code=303)
+
+        session_id = request.cookies.get(SESSION_COOKIE)
+        if session_id:
+            oidc_store.delete_session(session_id)
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(STATE_COOKIE, path="/auth")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -434,6 +560,8 @@ def _tenant_storage(
 def _identity_provider(settings: WebSettings) -> IdentityProvider:
     if settings.identity_mode == "local":
         return LocalIdentityProvider()
+    if settings.identity_mode == "oidc":
+        raise RuntimeError("OIDC identity provider must be initialized with a session store")
 
     secret = settings.gateway_shared_secret
     if secret is None:
@@ -484,3 +612,49 @@ def _readiness(settings: WebSettings) -> ReadinessResponse:
         schema_version=schema_version,
         environment=settings.environment,
     )
+
+
+
+def _validate_oidc_settings(settings: WebSettings) -> None:
+    missing = [
+        name
+        for name, value in (
+            ("XRAY_PUBLIC_BASE_URL", settings.public_base_url),
+            ("XRAY_OIDC_ISSUER_URL", settings.oidc_issuer_url),
+            ("XRAY_OIDC_CLIENT_ID", settings.oidc_client_id),
+            ("XRAY_OIDC_CLIENT_SECRET", settings.oidc_client_secret),
+        )
+        if not value
+    ]
+    if missing:
+        raise ValueError(
+            "OIDC mode requires: " + ", ".join(missing)
+        )
+
+    assert settings.public_base_url is not None
+    assert settings.oidc_issuer_url is not None
+    if settings.environment == "production":
+        if not settings.public_base_url.startswith("https://"):
+            raise ValueError("Production OIDC requires an https XRAY_PUBLIC_BASE_URL")
+        if not settings.oidc_issuer_url.startswith("https://"):
+            raise ValueError("Production OIDC requires an https issuer URL")
+
+
+def _oidc_client(settings: WebSettings) -> GenericOidcClient:
+    assert settings.oidc_issuer_url is not None
+    assert settings.oidc_client_id is not None
+    assert settings.oidc_client_secret is not None
+    return GenericOidcClient(
+        issuer_url=settings.oidc_issuer_url,
+        client_id=settings.oidc_client_id,
+        client_secret=settings.oidc_client_secret,
+    )
+
+
+def _oidc_redirect_uri(settings: WebSettings) -> str:
+    assert settings.public_base_url is not None
+    return settings.public_base_url.rstrip("/") + "/auth/callback"
+
+
+def _secure_oidc_cookie(settings: WebSettings) -> bool:
+    return settings.environment == "production"
