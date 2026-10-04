@@ -56,6 +56,9 @@ class Artifact(BaseModel):
     acquired_at: datetime = Field(default_factory=utc_now)
     acquisition_method: str
     source_declared: str | None = None
+    storage_uri: str | None = None
+    detected_encoding: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("sha256")
     @classmethod
@@ -71,8 +74,12 @@ class DerivedView(BaseModel):
     artifact_id: str
     kind: ViewKind
     content_sha256: str
+    byte_length: int = Field(ge=0)
+    media_type: str
     transformation: str
     transformation_version: str
+    encoding: str | None = None
+    storage_uri: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
 
