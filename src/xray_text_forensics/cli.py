@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import Annotated
@@ -9,6 +10,8 @@ from typing import Annotated
 import typer
 
 from xray_text_forensics.calibration import CalibrationConfig, calibrate, evaluate
+from xray_text_forensics.cases import CaseStore
+from xray_text_forensics.core import DetectorRun
 from xray_text_forensics.calibration.io import load_score_jsonl
 from xray_text_forensics.corpus import CorpusEngine
 from xray_text_forensics.corpus.loaders import load_directory
@@ -19,7 +22,9 @@ from xray_text_forensics.detectors.watermark import (
     ReferenceRedGreenDetector,
     StableWordTokenizer,
 )
+from xray_text_forensics.graph import build_evidence_graph
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
+from xray_text_forensics.reports import render_html_report, render_json_report, render_pdf_report
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 from xray_text_forensics.stylometry import ReferenceComparator
@@ -316,3 +321,104 @@ def stylometry_compare(
             f"char_svd={item.char_svd_similarity:.4f} "
             f"content={item.content_similarity:.4f}"
         )
+
+
+@app.command("case-create")
+def case_create(
+    database: Annotated[Path, typer.Argument()],
+    title: Annotated[str, typer.Argument()],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Create a persistent forensic case."""
+
+    with CaseStore(database) as case_store:
+        case = case_store.create_case(title)
+    if json_output:
+        typer.echo(case.model_dump_json(indent=2))
+    else:
+        typer.echo(f"case_id: {case.case_id}")
+
+
+@app.command("case-import-unicode")
+def case_import_unicode(
+    database: Annotated[Path, typer.Argument()],
+    case_id: Annotated[str, typer.Argument()],
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    store: Annotated[
+        Path,
+        typer.Option("--store", help="Local content-addressed evidence store."),
+    ] = Path(".xray-store"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Import an artifact, run Unicode forensics, and record the complete analysis."""
+
+    ingest_result = _ingestor(store, 100).ingest_path(path)
+    context = analysis_context_from_ingest(ingest_result)
+    evidence = UnicodeForensicsSuite().analyze(context)
+    run = DetectorRun(
+        detector_id="unicode.forensics.suite",
+        detector_version="1.0.0",
+        artifact_id=ingest_result.artifact.artifact_id,
+        view_ids=[view.view_id for view in ingest_result.views],
+        finished_at=datetime.now(UTC),
+        evidence_ids=[item.evidence_id for item in evidence],
+    )
+    with CaseStore(database) as case_store:
+        case_store.record_analysis(
+            case_id,
+            artifact=ingest_result.artifact,
+            views=ingest_result.views,
+            run=run,
+            evidence=evidence,
+        )
+        bundle = case_store.fetch_bundle(case_id)
+
+    if json_output:
+        typer.echo(bundle.model_dump_json(indent=2))
+    else:
+        typer.echo(f"artifact: {ingest_result.artifact.artifact_id}")
+        typer.echo(f"evidence: {len(evidence)}")
+
+
+@app.command("case-verify")
+def case_verify(
+    database: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    case_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Verify the append-only audit hash chain."""
+
+    with CaseStore(database) as case_store:
+        valid = case_store.verify_audit(case_id)
+    typer.echo("VERIFIED" if valid else "INVALID")
+    if not valid:
+        raise typer.Exit(code=2)
+
+
+@app.command("case-report")
+def case_report(
+    database: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    case_id: Annotated[str, typer.Argument()],
+    output: Annotated[Path, typer.Argument()],
+    format_name: Annotated[
+        str,
+        typer.Option("--format", help="json, html, or pdf"),
+    ] = "html",
+) -> None:
+    """Render a traceable case report."""
+
+    with CaseStore(database) as case_store:
+        bundle = case_store.fetch_bundle(case_id)
+    graph = build_evidence_graph(bundle)
+
+    normalized = format_name.casefold()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if normalized == "json":
+        output.write_text(render_json_report(bundle, graph), encoding="utf-8")
+    elif normalized == "html":
+        output.write_text(render_html_report(bundle, graph), encoding="utf-8")
+    elif normalized == "pdf":
+        output.write_bytes(render_pdf_report(bundle, graph))
+    else:
+        raise typer.BadParameter("format must be json, html, or pdf")
+
+    typer.echo(str(output))
