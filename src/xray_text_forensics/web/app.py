@@ -144,10 +144,18 @@ def create_app(
             content=response.model_dump(mode="json"),
         )
 
+    @app.get("/api/v1/session", response_model=Principal)
+    def session(request: Request) -> Principal:
+        return principal_from_request(request)
+
     @app.post("/api/v1/ingest", response_model=IngestResponse)
-    async def ingest(file: Annotated[UploadFile, File()]) -> IngestResponse:
+    async def ingest(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+    ) -> IngestResponse:
+        storage = _tenant_storage(request, storage_resolver)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -157,10 +165,12 @@ def create_app(
 
     @app.post("/api/v1/analyze/unicode", response_model=UnicodeAnalysisResponse)
     async def analyze_unicode(
+        request: Request,
         file: Annotated[UploadFile, File()],
     ) -> UnicodeAnalysisResponse:
+        storage = _tenant_storage(request, storage_resolver)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -175,9 +185,11 @@ def create_app(
 
     @app.post("/api/v1/compare-transform", response_model=PreservationMetrics)
     async def compare_transform(
+        request: Request,
         original: Annotated[UploadFile, File()],
         transformed: Annotated[UploadFile, File()],
     ) -> PreservationMetrics:
+        storage = _tenant_storage(request, storage_resolver)
         original_data, original_name = await _read_upload(
             original,
             settings.max_upload_bytes,
@@ -187,7 +199,7 @@ def create_app(
             settings.max_upload_bytes,
         )
         original_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 original_data,
                 filename=original_name,
                 acquisition_method="web-upload",
@@ -195,7 +207,7 @@ def create_app(
             )
         )
         transformed_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 transformed_data,
                 filename=transformed_name,
                 acquisition_method="web-upload",
@@ -210,9 +222,12 @@ def create_app(
         status_code=202,
     )
     async def submit_compare_transform(
+        request: Request,
         original: Annotated[UploadFile, File()],
         transformed: Annotated[UploadFile, File()],
     ) -> JobResponse:
+        principal = principal_from_request(request)
+        storage = _tenant_storage(request, storage_resolver)
         original_data, original_name = await _read_upload(
             original,
             settings.max_upload_bytes,
@@ -222,7 +237,7 @@ def create_app(
             settings.max_upload_bytes,
         )
         original_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 original_data,
                 filename=original_name,
                 acquisition_method="web-upload",
@@ -230,7 +245,7 @@ def create_app(
             )
         )
         transformed_text = _best_text(
-            _ingestor(settings).ingest_bytes(
+            _ingestor(settings, storage).ingest_bytes(
                 transformed_data,
                 filename=transformed_name,
                 acquisition_method="web-upload",
@@ -245,6 +260,7 @@ def create_app(
             job = job_manager.submit(
                 kind="compare-transform",
                 task=task,
+                owner_tenant_id=principal.tenant_id,
                 metadata={
                     "original_filename": original_name,
                     "transformed_filename": transformed_name,
@@ -259,32 +275,40 @@ def create_app(
         return JobResponse.from_domain(job)
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
-    def get_job(job_id: str) -> JobResponse:
-        job = job_manager.get(job_id)
+    def get_job(request: Request, job_id: str) -> JobResponse:
+        principal = principal_from_request(request)
+        job = job_manager.get(
+            job_id,
+            owner_tenant_id=principal.tenant_id,
+        )
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return JobResponse.from_domain(job)
 
     @app.post("/api/v1/cases", response_model=Case)
-    def create_case(request: CaseCreateRequest) -> Case:
-        with CaseStore(settings.case_database) as store:
-            return store.create_case(request.title)
+    def create_case(request: Request, payload: CaseCreateRequest) -> Case:
+        storage = _tenant_storage(request, storage_resolver)
+        with CaseStore(storage.case_database) as store:
+            return store.create_case(payload.title)
 
     @app.get("/api/v1/cases/{case_id}", response_model=CaseBundleResponse)
-    def get_case(case_id: str) -> CaseBundleResponse:
-        return CaseBundleResponse.from_domain(_bundle_or_404(settings, case_id))
+    def get_case(request: Request, case_id: str) -> CaseBundleResponse:
+        storage = _tenant_storage(request, storage_resolver)
+        return CaseBundleResponse.from_domain(_bundle_or_404(storage, case_id))
 
     @app.post(
         "/api/v1/cases/{case_id}/analyze/unicode",
         response_model=CaseBundleResponse,
     )
     async def case_analyze_unicode(
+        request: Request,
         case_id: str,
         file: Annotated[UploadFile, File()],
     ) -> CaseBundleResponse:
-        _bundle_or_404(settings, case_id)
+        storage = _tenant_storage(request, storage_resolver)
+        _bundle_or_404(storage, case_id)
         data, filename = await _read_upload(file, settings.max_upload_bytes)
-        result = _ingestor(settings).ingest_bytes(
+        result = _ingestor(settings, storage).ingest_bytes(
             data,
             filename=filename,
             acquisition_method="web-upload",
@@ -302,7 +326,7 @@ def create_app(
             finished_at=datetime.now(UTC),
             evidence_ids=[item.evidence_id for item in evidence],
         )
-        with CaseStore(settings.case_database) as store:
+        with CaseStore(storage.case_database) as store:
             store.record_analysis(
                 case_id,
                 artifact=result.artifact,
@@ -315,13 +339,15 @@ def create_app(
 
     @app.get("/api/v1/cases/{case_id}/report")
     def case_report(
+        request: Request,
         case_id: str,
         format_name: Annotated[
             Literal["json", "html", "pdf"],
             Query(alias="format"),
         ] = "json",
     ) -> Response:
-        bundle = _bundle_or_404(settings, case_id)
+        storage = _tenant_storage(request, storage_resolver)
+        bundle = _bundle_or_404(storage, case_id)
         graph = build_evidence_graph(bundle)
 
         if format_name == "html":
@@ -368,9 +394,12 @@ async def _read_upload(upload: UploadFile, max_bytes: int) -> tuple[bytes, str]:
     return b"".join(chunks), filename
 
 
-def _ingestor(settings: WebSettings) -> ForensicIngestor:
+def _ingestor(
+    settings: WebSettings,
+    storage: TenantStorage,
+) -> ForensicIngestor:
     return ForensicIngestor(
-        ContentAddressedStore(settings.object_store_root),
+        ContentAddressedStore(storage.object_store_root),
         IngestPolicy(max_input_bytes=settings.max_upload_bytes),
     )
 
@@ -383,9 +412,9 @@ def _best_text(result: IngestResult) -> str:
     return selected[1]
 
 
-def _bundle_or_404(settings: WebSettings, case_id: str) -> CaseBundle:
+def _bundle_or_404(storage: TenantStorage, case_id: str) -> CaseBundle:
     try:
-        with CaseStore(settings.case_database) as store:
+        with CaseStore(storage.case_database) as store:
             return store.fetch_bundle(case_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Case not found") from exc
