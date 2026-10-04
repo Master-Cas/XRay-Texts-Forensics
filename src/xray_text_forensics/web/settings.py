@@ -9,7 +9,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, Field
 
 EnvironmentName = Literal["development", "test", "production"]
-IdentityMode = Literal["local", "gateway"]
+IdentityMode = Literal["local", "gateway", "oidc"]
 
 
 class WebSettings(BaseModel):
@@ -25,6 +25,14 @@ class WebSettings(BaseModel):
     desktop_access_token: str | None = None
     identity_mode: IdentityMode = "local"
     gateway_shared_secret: str | None = None
+    public_base_url: str | None = None
+    oidc_issuer_url: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_scopes: str = "openid profile email"
+    oidc_tenant_claim: str = "org_id"
+    oidc_role_claim: str = "role"
+    oidc_session_ttl_seconds: int = Field(default=8 * 60 * 60, ge=300, le=7 * 24 * 60 * 60)
 
     @property
     def object_store_root(self) -> Path:
@@ -42,8 +50,8 @@ class WebSettings(BaseModel):
 
         environment_name = cast(EnvironmentName, environment)
         identity_mode = os.environ.get("XRAY_IDENTITY_MODE", "local").strip().casefold()
-        if identity_mode not in {"local", "gateway"}:
-            raise ValueError("XRAY_IDENTITY_MODE must be local or gateway")
+        if identity_mode not in {"local", "gateway", "oidc"}:
+            raise ValueError("XRAY_IDENTITY_MODE must be local, gateway, or oidc")
         identity_mode_name = cast(IdentityMode, identity_mode)
 
         docs_default = environment_name != "production"
@@ -63,6 +71,17 @@ class WebSettings(BaseModel):
             desktop_access_token=os.environ.get("XRAY_DESKTOP_ACCESS_TOKEN"),
             identity_mode=identity_mode_name,
             gateway_shared_secret=os.environ.get("XRAY_GATEWAY_SHARED_SECRET"),
+            public_base_url=os.environ.get("XRAY_PUBLIC_BASE_URL"),
+            oidc_issuer_url=os.environ.get("XRAY_OIDC_ISSUER_URL"),
+            oidc_client_id=os.environ.get("XRAY_OIDC_CLIENT_ID"),
+            oidc_client_secret=os.environ.get("XRAY_OIDC_CLIENT_SECRET"),
+            oidc_scopes=os.environ.get("XRAY_OIDC_SCOPES", "openid profile email"),
+            oidc_tenant_claim=os.environ.get("XRAY_OIDC_TENANT_CLAIM", "org_id"),
+            oidc_role_claim=os.environ.get("XRAY_OIDC_ROLE_CLAIM", "role"),
+            oidc_session_ttl_seconds=_env_int(
+                "XRAY_OIDC_SESSION_TTL_SECONDS",
+                8 * 60 * 60,
+            ),
         )
 
 
