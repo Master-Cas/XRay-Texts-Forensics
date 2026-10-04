@@ -33,6 +33,7 @@ class WebSettings(BaseModel):
     oidc_tenant_claim: str = "org_id"
     oidc_role_claim: str = "role"
     oidc_session_ttl_seconds: int = Field(default=8 * 60 * 60, ge=300, le=7 * 24 * 60 * 60)
+    oidc_allow_personal_tenant: bool = True
 
     @property
     def object_store_root(self) -> Path:
@@ -81,6 +82,10 @@ class WebSettings(BaseModel):
             oidc_session_ttl_seconds=_env_int(
                 "XRAY_OIDC_SESSION_TTL_SECONDS",
                 8 * 60 * 60,
+            ),
+            oidc_allow_personal_tenant=_env_bool(
+                "XRAY_OIDC_ALLOW_PERSONAL_TENANT",
+                True,
             ),
         )
 
