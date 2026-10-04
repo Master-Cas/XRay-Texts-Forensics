@@ -348,3 +348,79 @@ def test_generic_oidc_maps_org_role_and_personal_fallback(monkeypatch) -> None:
         allow_personal_tenant=True,
     )
     assert personal.tenant_id == "personal:user_2"
+
+
+def test_oidc_readiness_includes_auth_database(tmp_path) -> None:
+    fake = FakeOidcClient()
+    app = create_app(oidc_settings(tmp_path), oidc_client=fake)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/ready")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["checks"]["identity_mode"] == "oidc"
+    assert payload["checks"]["auth_database"] == "ok"
+    assert payload["checks"]["auth_journal_mode"] == "wal"
+
+
+def test_generic_oidc_rejects_subject_mismatch(monkeypatch) -> None:
+    client = GenericOidcClient(
+        issuer_url="https://identity.example",
+        client_id="client_test",
+        client_secret="secret_test",
+    )
+    monkeypatch.setattr(
+        client,
+        "_get_discovery",
+        lambda: {
+            "issuer": "https://identity.example",
+            "authorization_endpoint": "https://identity.example/authorize",
+            "token_endpoint": "https://identity.example/token",
+            "jwks_uri": "https://identity.example/jwks",
+        },
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, str]:
+            return {
+                "id_token": "fake-id-token",
+                "access_token": "fake-access-token",
+            }
+
+    monkeypatch.setattr(
+        "xray_text_forensics.web.oidc.httpx.post",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+    now = int(time.time())
+    monkeypatch.setattr(
+        client,
+        "_verify_id_token",
+        lambda *args, **kwargs: {
+            "sub": "identity-user",
+            "exp": now + 600,
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_verify_access_token",
+        lambda *args, **kwargs: {
+            "sub": "different-user",
+            "org_id": "org_1",
+            "exp": now + 300,
+        },
+    )
+
+    with pytest.raises(OidcError, match="subject"):
+        client.complete(
+            code="code",
+            redirect_uri="https://xray.example/auth/callback",
+            code_verifier="verifier",
+            expected_nonce="nonce",
+            tenant_claim="org_id",
+            role_claim="role",
+            allow_personal_tenant=True,
+        )
