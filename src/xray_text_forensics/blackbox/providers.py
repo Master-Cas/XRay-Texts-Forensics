@@ -8,14 +8,18 @@ import math
 from typing import Protocol
 
 
-class ChoiceProvider(Protocol):
-    """Provider capable of one forced-choice completion."""
+class ProviderIdentity(Protocol):
+    """Identity metadata for a collected black-box run."""
 
     @property
     def provider_id(self) -> str: ...
 
     @property
     def model_id(self) -> str: ...
+
+
+class ChoiceProvider(ProviderIdentity, Protocol):
+    """Provider capable of one forced-choice completion."""
 
     def choose(
         self,
@@ -93,10 +97,7 @@ class SyntheticChoiceProvider:
 
     def _draw(self, prefix: str, context: str, sample_index: int) -> float:
         digest = hashlib.sha256(
-            (
-                f"{self.seed}|draw|{prefix}|{context}|{sample_index}|"
-                f"{int(self.watermark_on)}"
-            ).encode()
+            f"{self.seed}|draw|{prefix}|{context}|{sample_index}".encode()
         ).digest()
         return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
@@ -106,3 +107,21 @@ def _softmax(logits: list[float]) -> list[float]:
     exponentials = [math.exp(value - maximum) for value in logits]
     total = sum(exponentials)
     return [value / total for value in exponentials]
+
+
+class RecordedProviderIdentity:
+    """Identity wrapper for observations collected outside the current process."""
+
+    def __init__(self, provider_id: str, model_id: str) -> None:
+        if not provider_id.strip() or not model_id.strip():
+            raise ValueError("provider_id and model_id cannot be blank")
+        self._provider_id = provider_id
+        self._model_id = model_id
+
+    @property
+    def provider_id(self) -> str:
+        return self._provider_id
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
