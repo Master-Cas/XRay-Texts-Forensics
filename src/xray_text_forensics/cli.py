@@ -8,6 +8,8 @@ from typing import Annotated
 
 import typer
 
+from xray_text_forensics.corpus import CorpusEngine
+from xray_text_forensics.corpus.loaders import load_directory
 from xray_text_forensics.detectors.unicode import UnicodeForensicsSuite
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
 from xray_text_forensics.runtime import analysis_context_from_ingest
@@ -34,10 +36,7 @@ def _ingestor(store: Path, max_mib: int) -> ForensicIngestor:
 
 @app.command()
 def ingest(
-    path: Annotated[
-        Path,
-        typer.Argument(exists=True, dir_okay=False, readable=True),
-    ],
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     store: Annotated[
         Path,
         typer.Option("--store", help="Local content-addressed evidence store."),
@@ -46,10 +45,7 @@ def ingest(
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
-    max_mib: Annotated[
-        int,
-        typer.Option(min=1, help="Maximum input size in MiB."),
-    ] = 100,
+    max_mib: Annotated[int, typer.Option(min=1, help="Maximum input size in MiB.")] = 100,
 ) -> None:
     """Preserve an artifact and create safe text views when supported."""
 
@@ -72,10 +68,7 @@ def ingest(
 
 @app.command("unicode")
 def unicode_scan(
-    path: Annotated[
-        Path,
-        typer.Argument(exists=True, dir_okay=False, readable=True),
-    ],
+    path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     store: Annotated[
         Path,
         typer.Option("--store", help="Local content-addressed evidence store."),
@@ -84,10 +77,7 @@ def unicode_scan(
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
-    max_mib: Annotated[
-        int,
-        typer.Option(min=1, help="Maximum input size in MiB."),
-    ] = 100,
+    max_mib: Annotated[int, typer.Option(min=1, help="Maximum input size in MiB.")] = 100,
 ) -> None:
     """Run deterministic Unicode forensics over the best preserved text view."""
 
@@ -111,3 +101,46 @@ def unicode_scan(
         count = item.parameters.get("total_count", item.parameters.get("total_sequences", ""))
         suffix = f" ({count})" if count != "" else ""
         typer.echo(f"{item.finding}: {item.status}{suffix}")
+
+
+@app.command("compare-corpora")
+def compare_corpora(
+    corpus_a: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    corpus_b: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
+    store: Annotated[
+        Path,
+        typer.Option("--store", help="Local content-addressed evidence store."),
+    ] = Path(".xray-store"),
+    context_kind: Annotated[
+        str,
+        typer.Option("--context", help="Co-occurrence context: sentence or paragraph."),
+    ] = "sentence",
+    top_n: Annotated[int, typer.Option("--top", min=1, help="Specificity rows.")] = 30,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Compare two directories as linguistic corpora."""
+
+    ingestor = _ingestor(store, 100)
+    documents_a, warnings_a = load_directory(corpus_a, ingestor)
+    documents_b, warnings_b = load_directory(corpus_b, ingestor)
+    engine_a = CorpusEngine(documents_a, name=corpus_a.name, context_kind=context_kind)
+    engine_b = CorpusEngine(documents_b, name=corpus_b.name, context_kind=context_kind)
+    comparison = engine_a.compare(engine_b, top_n=top_n)
+
+    if json_output:
+        payload = comparison.model_dump(mode="json")
+        payload["warnings"] = {"a": warnings_a, "b": warnings_b}
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    typer.echo("XRAY CORPUS COMPARISON")
+    typer.echo(f"A: {comparison.corpus_a.name} ({comparison.corpus_a.document_count} docs)")
+    typer.echo(f"B: {comparison.corpus_b.name} ({comparison.corpus_b.document_count} docs)")
+    typer.echo(f"TF-IDF cosine:       {comparison.cosine_similarity:.4f}")
+    typer.echo(f"Intertextual distance: {comparison.intertextual_distance:.4f}")
+    typer.echo("Top specificity:")
+    for row in comparison.specificity[:10]:
+        typer.echo(
+            f"  {row.term:<24} chi2={row.chi_square:8.3f} "
+            f"log2FC={row.log2_fold_change_a_over_b:+7.3f} -> {row.direction}"
+        )
