@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+
 from fastapi.testclient import TestClient
 
 from xray_text_forensics.web import WebSettings, create_app
@@ -399,3 +403,340 @@ def test_reference_document_upload_is_content_deduplicated(tmp_path) -> None:
 
     listed = web.get("/api/v1/references").json()
     assert listed[0]["document_count"] == 1
+
+
+
+def _minimal_odt_bytes(text: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr(
+            "META-INF/manifest.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <manifest:manifest
+              xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>""",
+        )
+        archive.writestr(
+            "content.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+            <office:document-content
+              xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+              xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+              <office:body>
+                <office:text>
+                  <text:p>{text}</text:p>
+                </office:text>
+              </office:body>
+            </office:document-content>""",
+        )
+    return buffer.getvalue()
+
+
+def test_private_odt_reference_participates_in_comparator(tmp_path) -> None:
+    web = client(tmp_path)
+    private_sets = {
+        "ODT human": "I walked home after work and made tea before reading the newspaper.",
+        "ODT model": (
+            "Across the quiet valley, a lantern remained visible while the traveler "
+            "considered the carefully described journey ahead."
+        ),
+    }
+
+    for label, sample in private_sets.items():
+        created = web.post(
+            "/api/v1/references",
+            json={"label": label, "source": "controlled-odt-test"},
+        )
+        assert created.status_code == 200, created.text
+        slug = created.json()["slug"]
+
+        odt_upload = web.post(
+            f"/api/v1/references/{slug}/documents",
+            files={
+                "file": (
+                    "sample-0.odt",
+                    _minimal_odt_bytes(sample),
+                    "application/vnd.oasis.opendocument.text",
+                )
+            },
+        )
+        assert odt_upload.status_code == 200, odt_upload.text
+
+        for index in range(1, 5):
+            txt_upload = web.post(
+                f"/api/v1/references/{slug}/documents",
+                files={
+                    "file": (
+                        f"sample-{index}.txt",
+                        f"{sample} Controlled variant number {index}.".encode(),
+                        "text/plain",
+                    )
+                },
+            )
+            assert txt_upload.status_code == 200, txt_upload.text
+
+    status = web.get("/api/v1/references/status")
+    assert status.status_code == 200, status.text
+    status_payload = status.json()
+    assert status_payload["active_scope"] == "tenant"
+    assert status_payload["tenant_ready"] is True
+    assert status_payload["total_tenant_documents"] == 10
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                b"Across the quiet valley, the traveler followed a distant light.",
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    assert payload["origin_assessment"]["state"] == "REFERENCE_COMPARISON"
+    assert {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    } == {"ODT human", "ODT model"}
+
+
+def _write_global_reference_root(tmp_path):
+    references = tmp_path / "global-references"
+    sets = {
+        "global-human": [
+            "I walked home after work and made tea before reading the newspaper.",
+            "We missed the bus, so my sister and I walked through the rain.",
+            "The shop closed early and I waited outside with my old coat.",
+            "I forgot my keys, called a friend, and sat near the front door.",
+            "We ate lunch outside while the dog slept under the wooden table.",
+        ],
+        "global-model": [
+            (
+                "Across the quiet valley, a lantern remained visible while the traveler "
+                "considered the carefully described journey ahead."
+            ),
+            (
+                "Beneath the evening sky, the river reflected a gentle light while the "
+                "traveler continued through the silent forest."
+            ),
+            (
+                "Within the tranquil garden, every path seemed to invite another thoughtful "
+                "step toward the softly illuminated horizon."
+            ),
+            (
+                "Beyond the sleeping village, a pale moon appeared above the distant hills "
+                "as the traveler reflected on the road ahead."
+            ),
+            (
+                "Along the ancient road, a soft wind carried distant sounds while the "
+                "traveler moved deliberately toward the morning light."
+            ),
+        ],
+    }
+    metadata = {
+        "global-human": {
+            "label": "Global human",
+            "provider": "human",
+            "source": "global-test",
+            "language": "en",
+        },
+        "global-model": {
+            "label": "Global model",
+            "provider": "test-model",
+            "model": "global-model-v1",
+            "source": "global-test",
+            "language": "en",
+        },
+    }
+    for slug, samples in sets.items():
+        directory = references / slug
+        directory.mkdir(parents=True)
+        (directory / ".xray-reference.json").write_text(
+            json.dumps(metadata[slug]),
+            encoding="utf-8",
+        )
+        for index, sample in enumerate(samples):
+            (directory / f"{index}.txt").write_text(sample, encoding="utf-8")
+    return references
+
+
+def test_reference_status_exposes_global_baseline(tmp_path) -> None:
+    references = _write_global_reference_root(tmp_path)
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "web-data",
+            reference_root=references,
+        )
+    )
+    web = TestClient(app)
+
+    response = web.get("/api/v1/references/status")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["active_scope"] == "global"
+    assert payload["total_global_documents"] == 10
+    assert payload["total_tenant_documents"] == 0
+    assert payload["tenant_sets"] == []
+    assert {
+        item["label"]
+        for item in payload["global_sets"]
+    } == {"Global human", "Global model"}
+
+
+def test_incomplete_private_references_do_not_disable_global(tmp_path) -> None:
+    references = _write_global_reference_root(tmp_path)
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "web-data",
+            reference_root=references,
+        )
+    )
+    web = TestClient(app)
+
+    private = web.post(
+        "/api/v1/references",
+        json={"label": "Private Claude", "source": "controlled-private"},
+    )
+    assert private.status_code == 200, private.text
+    slug = private.json()["slug"]
+    uploaded = web.post(
+        f"/api/v1/references/{slug}/documents",
+        files={
+            "file": (
+                "sample.txt",
+                b"One private known-origin sample that is intentionally below readiness.",
+                "text/plain",
+            )
+        },
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    status = web.get("/api/v1/references/status")
+    assert status.status_code == 200
+    status_payload = status.json()
+    assert status_payload["active_scope"] == "global"
+    assert status_payload["tenant_configured"] is True
+    assert status_payload["tenant_ready"] is False
+    assert status_payload["total_global_documents"] == 10
+    assert status_payload["total_tenant_documents"] == 1
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                (
+                    b"Beneath the evening sky, the traveler followed the river "
+                    b"toward a distant light beyond the quiet village."
+                ),
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    assert payload["origin_assessment"]["state"] == "REFERENCE_COMPARISON"
+    assert payload["reference_comparison"] is not None
+    assert {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    } == {"Global human", "Global model"}
+
+
+def test_ready_private_references_layer_global_baseline(tmp_path) -> None:
+    references = _write_global_reference_root(tmp_path)
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "web-data",
+            reference_root=references,
+        )
+    )
+    web = TestClient(app)
+
+    private_sets = {
+        "Private human": [
+            b"I called home after dinner and wrote a short note before going to bed.",
+            b"The train was late, so we waited by the station and talked about work.",
+            b"I washed the dishes, opened the window, and listened to the traffic.",
+            b"My neighbour knocked at noon and returned the book I had lent her.",
+            b"We bought bread, walked home, and left our wet umbrellas by the door.",
+        ],
+        "Private model": [
+            (
+                b"Across a tranquil landscape, the traveler contemplated the distant "
+                b"horizon with deliberate attention."
+            ),
+            (
+                b"Beneath a luminous sky, the path unfolded gradually through a quiet "
+                b"and carefully described valley."
+            ),
+            (
+                b"Within the silent garden, each measured step suggested another moment "
+                b"of thoughtful reflection."
+            ),
+            (
+                b"Beyond the village, the gentle river reflected the evening light while "
+                b"the traveler continued onward."
+            ),
+            (
+                b"Along the distant road, a calm wind moved through the trees as the "
+                b"traveler considered the journey."
+            ),
+        ],
+    }
+
+    for label, samples in private_sets.items():
+        created = web.post(
+            "/api/v1/references",
+            json={"label": label, "source": "controlled-private"},
+        )
+        assert created.status_code == 200, created.text
+        slug = created.json()["slug"]
+        for index, sample in enumerate(samples):
+            uploaded = web.post(
+                f"/api/v1/references/{slug}/documents",
+                files={
+                    "file": (
+                        f"{index}.txt",
+                        sample,
+                        "text/plain",
+                    )
+                },
+            )
+            assert uploaded.status_code == 200, uploaded.text
+
+    status = web.get("/api/v1/references/status")
+    assert status.status_code == 200, status.text
+    status_payload = status.json()
+    assert status_payload["active_scope"] == "combined"
+    assert status_payload["tenant_ready"] is True
+    assert status_payload["total_global_documents"] == 10
+    assert status_payload["total_tenant_documents"] == 10
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                (
+                    b"Across the quiet valley, the traveler continued toward a softly "
+                    b"illuminated horizon while considering the road ahead."
+                ),
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    labels = {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    }
+    assert labels == {
+        "Global human",
+        "Global model",
+        "Private human",
+        "Private model",
+    }

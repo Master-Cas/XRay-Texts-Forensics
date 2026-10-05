@@ -11,6 +11,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +54,60 @@ class ReferenceSetSummary(BaseModel):
     source: str
     license: str | None = None
     document_count: int
+
+
+class GlobalReferenceSetSummary(BaseModel):
+    label: str
+    provider: str | None = None
+    model: str | None = None
+    model_version: str | None = None
+    language: str | None = None
+    topic: str | None = None
+    source: str
+    license: str | None = None
+    document_count: int
+    manifest_sha256: str
+
+
+ReferenceActiveScope = Literal["none", "global", "tenant", "combined"]
+
+
+class ReferenceLibraryStatus(BaseModel):
+    active_scope: ReferenceActiveScope
+    global_sets: list[GlobalReferenceSetSummary]
+    tenant_sets: list[ReferenceSetSummary]
+    total_global_documents: int
+    total_tenant_documents: int
+    global_warning_count: int
+    tenant_configured: bool
+    tenant_ready: bool
+    tenant_unavailable_reason: str | None = None
+
+
+def summarize_global_references(
+    comparator: ReferenceComparator | None,
+) -> list[GlobalReferenceSetSummary]:
+    if comparator is None:
+        return []
+
+    summaries: list[GlobalReferenceSetSummary] = []
+    for label in sorted(comparator.manifests):
+        manifest = comparator.manifests[label]
+        summaries.append(
+            GlobalReferenceSetSummary(
+                label=manifest.label,
+                provider=manifest.provider,
+                model=manifest.model,
+                model_version=manifest.model_version,
+                language=manifest.language,
+                topic=manifest.topic,
+                source=manifest.source,
+                license=manifest.license,
+                document_count=manifest.document_count,
+                manifest_sha256=manifest.manifest_sha256,
+            )
+        )
+    return summaries
 
 
 class ReferenceDocumentResponse(BaseModel):

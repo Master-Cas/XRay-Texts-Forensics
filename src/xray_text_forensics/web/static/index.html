@@ -196,14 +196,25 @@
             <p class="eyebrow">Known-origin library</p>
             <h1 id="references-title">Build your reference corpora</h1>
             <p>
-              Add texts whose origin you already know. XRay keeps these samples inside your
-              account and uses them for comparative style, character-pattern and content signals.
+              XRay uses a deployment-wide baseline automatically. You can add private
+              known-origin samples here to supplement that baseline inside your account.
             </p>
           </div>
         </div>
 
+        <section class="surface">
+          <div class="result-toolbar">
+            <h2>Global XRay baseline</h2>
+            <span id="global-reference-count" class="pill">Loading…</span>
+          </div>
+          <p id="global-reference-status" class="scientific-note">
+            Loading deployment-wide reference corpora.
+          </p>
+          <div id="global-reference-list" class="reference-library-list"></div>
+        </section>
+
         <form id="reference-create-form" class="surface">
-          <h2>New reference set</h2>
+          <h2>New private reference set</h2>
           <div class="reference-form-grid">
             <div>
               <label for="reference-label">Label</label>

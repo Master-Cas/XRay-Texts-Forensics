@@ -25,6 +25,7 @@ from xray_text_forensics.reports import render_html_report, render_pdf_report
 from xray_text_forensics.robustness import PreservationMetrics, compare_texts
 from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
+from xray_text_forensics.stylometry import ReferenceComparator
 
 from .desktop_access import DesktopAccessMiddleware
 from .full_scan import FullScanResponse, load_reference_comparator, run_full_scan
@@ -58,12 +59,50 @@ from .oidc import (
 )
 from .reference_library import (
     ReferenceDocumentResponse,
+    ReferenceLibraryStatus,
     ReferenceSetCreate,
     ReferenceSetSummary,
     TenantReferenceLibrary,
+    summarize_global_references,
 )
 from .settings import WebSettings
 from .tenant_storage import TenantStorage, TenantStorageResolver
+
+
+def _layer_reference_comparators(
+    global_comparator: ReferenceComparator | None,
+    tenant_comparator: ReferenceComparator | None,
+) -> ReferenceComparator | None:
+    """Layer private references on top of the deployment-wide baseline."""
+
+    if global_comparator is None:
+        return tenant_comparator
+    if tenant_comparator is None:
+        return global_comparator
+
+    references = list(global_comparator.references)
+    used_labels = {reference.metadata.label for reference in references}
+
+    for reference in tenant_comparator.references:
+        label = reference.metadata.label
+        if label in used_labels:
+            base = f"Private · {label}"
+            candidate = base
+            suffix = 2
+            while candidate in used_labels:
+                candidate = f"{base} ({suffix})"
+                suffix += 1
+            reference = reference.model_copy(
+                update={
+                    "metadata": reference.metadata.model_copy(
+                        update={"label": candidate}
+                    )
+                }
+            )
+        used_labels.add(reference.metadata.label)
+        references.append(reference)
+
+    return ReferenceComparator(references)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -335,20 +374,50 @@ def create_app(
             source_declared="web-upload",
         )
         tenant_reference = reference_library.comparator_for(storage)
-        if tenant_reference.configured:
-            comparator = tenant_reference.comparator
-            warning_count = tenant_reference.warning_count
-            unavailable_reason = tenant_reference.unavailable_reason
-        else:
-            comparator = reference_comparator
-            warning_count = reference_warning_count
-            unavailable_reason = None
+        comparator = _layer_reference_comparators(
+            reference_comparator,
+            tenant_reference.comparator,
+        )
+        warning_count = reference_warning_count + tenant_reference.warning_count
+        unavailable_reason = (
+            tenant_reference.unavailable_reason
+            if comparator is None and tenant_reference.configured
+            else None
+        )
 
         return run_full_scan(
             result,
             comparator=comparator,
             reference_warning_count=warning_count,
             reference_unavailable_reason=unavailable_reason,
+        )
+
+    @app.get("/api/v1/references/status", response_model=ReferenceLibraryStatus)
+    def reference_library_status(request: Request) -> ReferenceLibraryStatus:
+        storage = _tenant_storage(request, storage_resolver)
+        tenant_sets = reference_library.list_sets(storage)
+        tenant_reference = reference_library.comparator_for(storage)
+        global_sets = summarize_global_references(reference_comparator)
+
+        if reference_comparator is not None and tenant_reference.comparator is not None:
+            active_scope: Literal["none", "global", "tenant", "combined"] = "combined"
+        elif tenant_reference.comparator is not None:
+            active_scope = "tenant"
+        elif reference_comparator is not None:
+            active_scope = "global"
+        else:
+            active_scope = "none"
+
+        return ReferenceLibraryStatus(
+            active_scope=active_scope,
+            global_sets=global_sets,
+            tenant_sets=tenant_sets,
+            total_global_documents=sum(item.document_count for item in global_sets),
+            total_tenant_documents=sum(item.document_count for item in tenant_sets),
+            global_warning_count=reference_warning_count,
+            tenant_configured=tenant_reference.configured,
+            tenant_ready=tenant_reference.comparator is not None,
+            tenant_unavailable_reason=tenant_reference.unavailable_reason,
         )
 
     @app.get("/api/v1/references", response_model=list[ReferenceSetSummary])

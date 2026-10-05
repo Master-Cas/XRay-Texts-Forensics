@@ -72,5 +72,9 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     assert "Unicode representation changes after normalization" in script.text
     assert "Build your reference corpora" in page.text
     assert "Known-origin library" in page.text
-    assert '"/references"' in script.text
+    assert "Global XRay baseline" in page.text
+    assert "New private reference set" in page.text
+    assert '"/references/status"' in script.text
     assert "Add known-origin samples" in script.text
+    assert ".odt" in script.text
+    assert "incomplete private sets never disable the global baseline" in script.text
