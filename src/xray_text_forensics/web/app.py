@@ -159,7 +159,7 @@ def create_app(
             oidc_client = _oidc_client(settings)
         if identity_provider is None:
             identity_provider = OidcSessionIdentityProvider(oidc_store)
-        app.add_event_handler("shutdown", oidc_store.close)
+        app.router.add_event_handler("shutdown", oidc_store.close)
     elif identity_provider is None:
         identity_provider = _identity_provider(settings)
 
@@ -180,7 +180,7 @@ def create_app(
         max_pending_jobs=settings.max_pending_jobs,
     )
     app.state.job_manager = job_manager
-    app.add_event_handler("shutdown", job_manager.shutdown)
+    app.router.add_event_handler("shutdown", job_manager.shutdown)
     app.add_middleware(
         RequestContextMiddleware,
         enabled=settings.request_logging,
