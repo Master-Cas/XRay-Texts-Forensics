@@ -26,6 +26,14 @@ class TenantStorage:
     def case_database(self) -> Path:
         return self.root / "cases.sqlite"
 
+    @property
+    def reference_root(self) -> Path:
+        return self.root / "references"
+
+    @property
+    def reference_object_store_root(self) -> Path:
+        return self.root / "reference-objects"
+
 
 class TenantStorageResolver:
     def __init__(self, data_root: Path) -> None:
@@ -40,6 +48,8 @@ class TenantStorageResolver:
 
         root.mkdir(parents=True, exist_ok=True)
         (root / "objects").mkdir(parents=True, exist_ok=True)
+        (root / "references").mkdir(parents=True, exist_ok=True)
+        (root / "reference-objects").mkdir(parents=True, exist_ok=True)
         return TenantStorage(
             tenant_id=principal.tenant_id,
             root=root,
