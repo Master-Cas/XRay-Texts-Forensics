@@ -23,7 +23,7 @@ or tokenized representation is a `DerivedView`.
 - JSON
 - CSV
 - HTML
-- DOCX
+- DOCX and ODT
 - PDF
 
 Unknown binary formats are still preservable as artifacts, but do not receive textual views.
