@@ -25,7 +25,7 @@ from xray_text_forensics.stylometry import (
 
 from .tenant_storage import TenantStorage
 
-_ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".csv", ".html", ".docx", ".pdf"}
+_ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".csv", ".html", ".docx", ".odt", ".pdf"}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _MIN_REFERENCE_SETS = 2
 _MIN_DOCUMENTS_PER_SET = 5
@@ -148,7 +148,7 @@ class TenantReferenceLibrary:
         suffix = Path(filename).suffix.casefold()
         if suffix not in _ALLOWED_SUFFIXES:
             raise ValueError(
-                "Reference documents must be TXT, Markdown, JSON, CSV, HTML, DOCX or PDF"
+                "Reference documents must be TXT, Markdown, JSON, CSV, HTML, DOCX, ODT or PDF"
             )
         if not data:
             raise ValueError("Reference document is empty")

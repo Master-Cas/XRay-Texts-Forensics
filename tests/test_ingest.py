@@ -92,6 +92,60 @@ def test_minimal_docx_text_extraction(tmp_path) -> None:
     assert read_view(extracted).decode() == "Hello DOCX\nSecond paragraph"
 
 
+
+
+def test_minimal_odt_text_extraction(tmp_path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr(
+            "META-INF/manifest.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <manifest:manifest
+              xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>""",
+        )
+        archive.writestr(
+            "content.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <office:document-content
+              xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+              xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+              <office:body>
+                <office:text>
+                  <text:h>Guion</text:h>
+                  <text:p>Primera línea<text:line-break/>segunda línea</text:p>
+                  <text:p>Texto <text:span>con formato</text:span>.</text:p>
+                </office:text>
+              </office:body>
+            </office:document-content>""",
+        )
+
+    result = make_ingestor(tmp_path).ingest_bytes(buffer.getvalue(), filename="guion.odt")
+
+    assert result.artifact.media_type == "application/vnd.oasis.opendocument.text"
+    extracted = next(view for view in result.views if view.kind is ViewKind.EXTRACTED_TEXT)
+    assert read_view(extracted).decode() == (
+        "Guion\nPrimera línea\nsegunda línea\nTexto con formato."
+    )
+    assert not result.warnings
+
+
+def test_odt_signature_wins_over_wrong_extension(tmp_path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr(
+            "content.xml",
+            """<office:document-content
+              xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+              xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+              <office:body><office:text><text:p>ODT text</text:p></office:text></office:body>
+            </office:document-content>""",
+        )
+
+    result = make_ingestor(tmp_path).ingest_bytes(buffer.getvalue(), filename="wrong.bin")
+    assert result.artifact.media_type == "application/vnd.oasis.opendocument.text"
+
 def test_valid_pdf_is_preserved_and_text_view_created(tmp_path) -> None:
     buffer = io.BytesIO()
     writer = PdfWriter()
