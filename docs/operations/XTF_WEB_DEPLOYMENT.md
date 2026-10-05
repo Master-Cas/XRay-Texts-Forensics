@@ -17,7 +17,7 @@ XTF uses these paths:
 - environment file: `/opt/xtf/deploy/xtf.env`
 - persistent application data: `/var/lib/xtf`
 - global reference library: `/opt/xtf/reference-data/library`, mounted read-only
-- deployment backups: `/opt/xtf/backups/<UTC timestamp>`
+- deployment backups: `/opt/xtf/backups/<UTC timestamp>`; backup root and timestamped directories are private mode `0700`, and backup files are mode `0600`
 
 Caddy is not part of the XTF Compose project. Normal XTF releases do **not** restart,
 reload, or modify Caddy, DNS, TLS, or OIDC configuration.
@@ -93,8 +93,15 @@ Rollback restores:
 - the previous `compose.release.yaml`, or removes it if none existed;
 - the previous XTF container definition/image by running Compose for the XTF service only.
 
-The rollback waits for the restored XTF container to become healthy. Caddy is not
-restarted.
+Before XTF is stopped, the script resolves the XTF service image from the exact Compose
+files that would be restored and requires it to equal the currently running image. If a
+pre-existing runtime override exists, base Compose plus that override must resolve to the
+captured image; without an override, base Compose alone must resolve to it. A mismatch
+fails before the service is stopped.
+
+After rollback runs `docker compose up`, the script verifies that the restored container
+uses exactly the captured previous image and becomes healthy. An image or health mismatch
+is logged as `ROLLBACK FAILED` and requires manual recovery. Caddy is not restarted.
 
 The data backup is retained for disaster recovery but is **not automatically restored**
 during a normal application rollback. Automatic restoration of the database/data tree
@@ -112,6 +119,10 @@ In particular:
 - container environment dumps are not part of the procedure;
 - backups created by the script contain application data and deployment metadata, not a
   duplicate of `xtf.env`;
+- `/opt/xtf/backups` and every timestamped backup directory are mode `0700`;
+- every backup file, including `xtf-data.tgz` and deployment metadata, is mode `0600`;
+- forensic case data, stored objects, and the auth database in backups must not be readable
+  by other users on the host;
 - logs contain release SHA, image tag, paths, health state, and backup location only.
 
 ## Idempotency
