@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 
 from fastapi.testclient import TestClient
 
@@ -401,6 +403,102 @@ def test_reference_document_upload_is_content_deduplicated(tmp_path) -> None:
 
     listed = web.get("/api/v1/references").json()
     assert listed[0]["document_count"] == 1
+
+
+
+def _minimal_odt_bytes(text: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr(
+            "META-INF/manifest.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <manifest:manifest
+              xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>""",
+        )
+        archive.writestr(
+            "content.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+            <office:document-content
+              xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+              xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+              <office:body>
+                <office:text>
+                  <text:p>{text}</text:p>
+                </office:text>
+              </office:body>
+            </office:document-content>""",
+        )
+    return buffer.getvalue()
+
+
+def test_private_odt_reference_participates_in_comparator(tmp_path) -> None:
+    web = client(tmp_path)
+    private_sets = {
+        "ODT human": "I walked home after work and made tea before reading the newspaper.",
+        "ODT model": (
+            "Across the quiet valley, a lantern remained visible while the traveler "
+            "considered the carefully described journey ahead."
+        ),
+    }
+
+    for label, sample in private_sets.items():
+        created = web.post(
+            "/api/v1/references",
+            json={"label": label, "source": "controlled-odt-test"},
+        )
+        assert created.status_code == 200, created.text
+        slug = created.json()["slug"]
+
+        odt_upload = web.post(
+            f"/api/v1/references/{slug}/documents",
+            files={
+                "file": (
+                    "sample-0.odt",
+                    _minimal_odt_bytes(sample),
+                    "application/vnd.oasis.opendocument.text",
+                )
+            },
+        )
+        assert odt_upload.status_code == 200, odt_upload.text
+
+        for index in range(1, 5):
+            txt_upload = web.post(
+                f"/api/v1/references/{slug}/documents",
+                files={
+                    "file": (
+                        f"sample-{index}.txt",
+                        f"{sample} Controlled variant number {index}.".encode(),
+                        "text/plain",
+                    )
+                },
+            )
+            assert txt_upload.status_code == 200, txt_upload.text
+
+    status = web.get("/api/v1/references/status")
+    assert status.status_code == 200, status.text
+    status_payload = status.json()
+    assert status_payload["active_scope"] == "tenant"
+    assert status_payload["tenant_ready"] is True
+    assert status_payload["total_tenant_documents"] == 10
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                b"Across the quiet valley, the traveler followed a distant light.",
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    assert payload["origin_assessment"]["state"] == "REFERENCE_COMPARISON"
+    assert {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    } == {"ODT human", "ODT model"}
 
 
 def _write_global_reference_root(tmp_path):
