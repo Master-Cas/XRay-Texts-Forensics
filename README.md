@@ -131,6 +131,7 @@ Operational endpoints:
 - `POST /api/v1/analyze/full` — multi-family forensic scan with explicit NOT_TESTABLE states
 - `GET/POST /api/v1/references` — tenant-scoped known-origin reference library
 - `POST /api/v1/references/{set_slug}/documents` — add content-deduplicated reference samples
+- Global reference/benchmark data is versioned separately in `Master-Cas/XRay-Benchmarks` and mounted via `XRAY_REFERENCE_ROOT`.
 
 The default bind is `127.0.0.1:8080`.
 
