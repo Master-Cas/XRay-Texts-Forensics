@@ -223,3 +223,110 @@ def test_full_scan_uses_configured_reference_corpora(tmp_path) -> None:
     }["reference_stylometry"]
     assert family["state"] == "COMPLETE"
     assert "not provider probabilities" in family["summary"].casefold()
+
+
+def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
+    web = client(tmp_path)
+
+    human = web.post(
+        "/api/v1/references",
+        json={
+            "label": "Human stories",
+            "provider": "human",
+            "language": "en",
+            "source": "controlled-test",
+        },
+    )
+    model = web.post(
+        "/api/v1/references",
+        json={
+            "label": "Model stories",
+            "provider": "synthetic-model",
+            "language": "en",
+            "source": "controlled-test",
+        },
+    )
+    assert human.status_code == 200, human.text
+    assert model.status_code == 200, model.text
+
+    human_slug = human.json()["slug"]
+    model_slug = model.json()["slug"]
+    human_samples = [
+        b"I got home late. The kettle was cold. I fed the cat and went to bed.",
+        b"We missed the bus. Sam laughed. I called my sister and walked home.",
+        b"My coat was wet. The shop was closed. I waited under the old awning.",
+    ]
+    model_samples = [
+        b"Across the quiet valley, a lantern glowed while the traveler considered the long journey ahead.",
+        b"Beneath the evening sky, the river reflected a gentle light as the traveler crossed the forest.",
+        b"Within the silent garden, every path invited another careful step toward the distant horizon.",
+    ]
+
+    for index, sample in enumerate(human_samples):
+        response = web.post(
+            f"/api/v1/references/{human_slug}/documents",
+            files={"file": (f"human-{index}.txt", sample, "text/plain")},
+        )
+        assert response.status_code == 200, response.text
+
+    for index, sample in enumerate(model_samples):
+        response = web.post(
+            f"/api/v1/references/{model_slug}/documents",
+            files={"file": (f"model-{index}.txt", sample, "text/plain")},
+        )
+        assert response.status_code == 200, response.text
+
+    listed = web.get("/api/v1/references")
+    assert listed.status_code == 200
+    by_label = {item["label"]: item for item in listed.json()}
+    assert by_label["Human stories"]["document_count"] == 3
+    assert by_label["Model stories"]["document_count"] == 3
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                (
+                    b"Beneath the quiet sky, the traveler followed the river "
+                    b"toward a softly illuminated horizon."
+                ),
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    assert payload["origin_assessment"]["state"] == "REFERENCE_COMPARISON"
+    assert payload["reference_comparison"] is not None
+    assert {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    } == {"Human stories", "Model stories"}
+
+
+def test_reference_document_upload_is_content_deduplicated(tmp_path) -> None:
+    web = client(tmp_path)
+    created = web.post(
+        "/api/v1/references",
+        json={"label": "Claude", "source": "controlled-test"},
+    )
+    assert created.status_code == 200
+    slug = created.json()["slug"]
+    payload = b"Known-origin sample text."
+
+    first = web.post(
+        f"/api/v1/references/{slug}/documents",
+        files={"file": ("first.txt", payload, "text/plain")},
+    )
+    second = web.post(
+        f"/api/v1/references/{slug}/documents",
+        files={"file": ("second.txt", payload, "text/plain")},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["added"] is True
+    assert second.json()["added"] is False
+
+    listed = web.get("/api/v1/references").json()
+    assert listed[0]["document_count"] == 1
