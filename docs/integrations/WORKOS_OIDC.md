@@ -36,23 +36,26 @@ XRAY_IDENTITY_MODE=oidc
 XRAY_PUBLIC_BASE_URL=https://xray.example.com
 XRAY_OIDC_ISSUER_URL=https://your-domain.authkit.app
 XRAY_OIDC_CLIENT_ID=<workos-oauth-application-client-id>
-XRAY_OIDC_CLIENT_SECRET=<workos-oauth-application-client-secret>
 
 # Configure this if the WorkOS access-token aud differs from the OAuth app client ID.
 XRAY_OIDC_ACCESS_TOKEN_AUDIENCE=<expected-access-token-audience>
 
 XRAY_OIDC_SCOPES="openid profile email"
 XRAY_OIDC_TENANT_CLAIM=org_id
+
+# WorkOS public OAuth application with PKCE:
+XRAY_OIDC_TOKEN_AUTH_METHOD=none
+```
+
+For a confidential OAuth application instead, set:
+
+```text
+XRAY_OIDC_CLIENT_SECRET=<workos-oauth-application-client-secret>
 XRAY_OIDC_TOKEN_AUTH_METHOD=client_secret_post
 ```
 
-Never commit the client secret.
-
-Use your deployment platform's secret manager for:
-
-```text
-XRAY_OIDC_CLIENT_SECRET
-```
+Never commit a client secret. If a confidential client is used, keep the secret in the
+deployment platform's secret manager.
 
 ## Access-token audience
 
@@ -123,13 +126,15 @@ A login without organization context will then be rejected.
 
 ## WorkOS token exchange
 
-The initial WorkOS integration uses:
+The production XTF WorkOS Connect application is configured as a public OAuth application:
 
 ```text
-XRAY_OIDC_TOKEN_AUTH_METHOD=client_secret_post
+XRAY_OIDC_TOKEN_AUTH_METHOD=none
 ```
 
-XRay still sends PKCE S256 even though the Web app is a confidential client.
+XRay sends PKCE S256 and the OAuth client ID during token exchange, without a client secret.
+Confidential WorkOS applications remain supported with `client_secret_post` or
+`client_secret_basic`.
 
 ## Production HTTPS
 
