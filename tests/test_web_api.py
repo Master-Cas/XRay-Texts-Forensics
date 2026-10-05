@@ -125,10 +125,10 @@ def test_full_scan_exposes_multiple_evidence_families(tmp_path) -> None:
             "file": (
                 "story.txt",
                 (
-                    "The small star crossed the quiet sky. "
-                    "It stopped above the forest and listened to the river. "
-                    "Then it returned home with a different light."
-                ).encode(),
+                    b"The small star crossed the quiet sky. "
+                    b"It stopped above the forest and listened to the river. "
+                    b"Then it returned home with a different light."
+                ),
                 "text/plain",
             )
         },
