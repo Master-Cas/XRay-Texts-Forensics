@@ -9,7 +9,7 @@ XRay handles potentially sensitive forensic material and, later, secret watermar
 3. Preserve the immutable original artifact and its cryptographic digest.
 4. Never overwrite historical detector results; version them.
 5. Never write secret-key material into logs, reports, fixtures, or exception messages.
-6. Third-party dependencies must be scanned in CI.
+6. Third-party dependencies must be scanned in CI. The dependency-audit workflow resolves `.[dev,desktop,packaging]` independently on Ubuntu and Windows with Python 3.12.6, audits the resulting third-party environment with `pip-audit==2.10.1`, and fails closed on active advisories or audit collection errors without vulnerability suppressions.
 
 ## Reporting a vulnerability
 
