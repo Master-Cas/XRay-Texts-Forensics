@@ -93,6 +93,44 @@ def test_readiness_checks_database_wal_and_object_store(tmp_path) -> None:
     assert payload["environment"] == "test"
 
 
+
+def test_build_sha_is_exposed_by_health_and_readiness(monkeypatch, tmp_path) -> None:
+    build_sha = "a" * 40
+    monkeypatch.setenv("XRAY_BUILD_SHA", build_sha)
+    monkeypatch.setenv("XRAY_DATA_ROOT", str(tmp_path / "data"))
+
+    settings = WebSettings.from_environment()
+    app = create_app(settings)
+    with TestClient(app) as client:
+        health = client.get("/api/v1/health")
+        ready = client.get("/api/v1/ready")
+
+    assert health.status_code == 200
+    assert health.json()["build_sha"] == build_sha
+    assert ready.status_code == 200
+    assert ready.json()["build_sha"] == build_sha
+
+
+def test_build_sha_is_optional_locally(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("XRAY_BUILD_SHA", raising=False)
+    monkeypatch.setenv("XRAY_DATA_ROOT", str(tmp_path / "data"))
+
+    settings = WebSettings.from_environment()
+    assert settings.build_sha is None
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health").json()["build_sha"] is None
+        assert client.get("/api/v1/ready").json()["build_sha"] is None
+
+
+def test_invalid_build_sha_is_rejected(monkeypatch) -> None:
+    monkeypatch.setenv("XRAY_BUILD_SHA", "not-a-git-sha")
+
+    with pytest.raises(ValueError):
+        WebSettings.from_environment()
+
+
 def test_request_id_is_propagated_and_logged_as_json(tmp_path, caplog) -> None:
     app = create_app(WebSettings(data_root=tmp_path / "data", environment="test"))
     caplog.set_level(logging.INFO, logger="xray.web.access")
