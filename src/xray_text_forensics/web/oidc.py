@@ -299,13 +299,15 @@ class GenericOidcClient:
         *,
         issuer_url: str,
         client_id: str,
-        client_secret: str,
+        client_secret: str | None,
         access_token_audience: str | None = None,
         token_auth_method: str = "client_secret_post",
         timeout_seconds: float = 8.0,
     ) -> None:
-        if token_auth_method not in {"client_secret_post", "client_secret_basic"}:
+        if token_auth_method not in {"client_secret_post", "client_secret_basic", "none"}:
             raise ValueError("Unsupported OIDC token endpoint auth method")
+        if token_auth_method != "none" and not client_secret:
+            raise ValueError("Confidential OIDC clients require a client secret")
         self.issuer_url = issuer_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
@@ -366,10 +368,14 @@ class GenericOidcClient:
             "code_verifier": code_verifier,
         }
         auth: tuple[str, str] | None = None
-        if self.token_auth_method == "client_secret_post":
+        if self.token_auth_method == "none":
+            token_data["client_id"] = self.client_id
+        elif self.token_auth_method == "client_secret_post":
+            assert self.client_secret is not None
             token_data["client_id"] = self.client_id
             token_data["client_secret"] = self.client_secret
         else:
+            assert self.client_secret is not None
             auth = (self.client_id, self.client_secret)
 
         try:
