@@ -85,6 +85,7 @@ def run_full_scan(
     *,
     comparator: ReferenceComparator | None,
     reference_warning_count: int = 0,
+    reference_unavailable_reason: str | None = None,
 ) -> FullScanResponse:
     context = analysis_context_from_ingest(result)
     unicode_evidence = UnicodeForensicsSuite().analyze(context)
@@ -100,7 +101,11 @@ def run_full_scan(
                 state="NOT_TESTABLE",
                 summary="No usable text view was available for linguistic analysis.",
             ),
-            _reference_unavailable_summary(comparator, reference_warning_count),
+            _reference_unavailable_summary(
+                comparator,
+                reference_warning_count,
+                reference_unavailable_reason,
+            ),
             _watermark_summary(),
         ]
         return FullScanResponse(
@@ -127,7 +132,12 @@ def run_full_scan(
     families = [
         _unicode_summary(unicode_evidence),
         _linguistic_summary(linguistic_snapshot),
-        _reference_summary(reference_report, comparator, reference_warning_count),
+        _reference_summary(
+            reference_report,
+            comparator,
+            reference_warning_count,
+            reference_unavailable_reason,
+        ),
         _watermark_summary(),
     ]
 
@@ -207,6 +217,7 @@ def _linguistic_summary(snapshot: CorpusSnapshot) -> AnalysisFamilySummary:
 def _reference_unavailable_summary(
     comparator: ReferenceComparator | None,
     warning_count: int,
+    unavailable_reason: str | None,
 ) -> AnalysisFamilySummary:
     if comparator is not None:
         return AnalysisFamilySummary(
@@ -215,15 +226,19 @@ def _reference_unavailable_summary(
             state="ERROR",
             summary="Reference corpora loaded but the document could not be compared.",
         )
-    suffix = " The configured reference library could not be loaded." if warning_count else ""
+    if unavailable_reason:
+        summary = unavailable_reason
+    else:
+        suffix = " The configured reference library could not be loaded." if warning_count else ""
+        summary = (
+            "No versioned reference corpus is configured, so XRay cannot compare this text "
+            "with known human or model samples yet." + suffix
+        )
     return AnalysisFamilySummary(
         family="reference_stylometry",
         title="Reference-corpus comparison",
         state="NOT_TESTABLE",
-        summary=(
-            "No versioned reference corpus is configured, so XRay cannot compare this text "
-            "with known human or model samples yet." + suffix
-        ),
+        summary=summary,
     )
 
 
@@ -231,9 +246,14 @@ def _reference_summary(
     report: ReferenceComparisonReport | None,
     comparator: ReferenceComparator | None,
     warning_count: int,
+    unavailable_reason: str | None,
 ) -> AnalysisFamilySummary:
     if report is None:
-        return _reference_unavailable_summary(comparator, warning_count)
+        return _reference_unavailable_summary(
+            comparator,
+            warning_count,
+            unavailable_reason,
+        )
 
     if not report.comparisons:
         return AnalysisFamilySummary(
