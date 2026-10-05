@@ -181,7 +181,19 @@ XRAY_IDENTITY_MODE=oidc
 XRAY_PUBLIC_BASE_URL=https://xray.example.com
 XRAY_OIDC_ISSUER_URL=https://<issuer>
 XRAY_OIDC_CLIENT_ID=<client-id>
+```
+
+Confidential clients additionally require:
+
+```text
 XRAY_OIDC_CLIENT_SECRET=<secret>
+XRAY_OIDC_TOKEN_AUTH_METHOD=client_secret_post
+```
+
+Public clients use PKCE without a client secret:
+
+```text
+XRAY_OIDC_TOKEN_AUTH_METHOD=none
 ```
 
 Provider-dependent access-token audience:
@@ -211,8 +223,10 @@ Supported:
 
 - `client_secret_post`
 - `client_secret_basic`
+- `none` for public PKCE clients
 
-The default is `client_secret_post`, matching the initial WorkOS Connect integration.
+The default remains `client_secret_post` for backward compatibility. The production
+XTF WorkOS Connect application is a public PKCE client and therefore uses `none`.
 
 ## Session lifetime
 

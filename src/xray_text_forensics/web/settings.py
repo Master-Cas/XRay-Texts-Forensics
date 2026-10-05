@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 EnvironmentName = Literal["development", "test", "production"]
 IdentityMode = Literal["local", "gateway", "oidc"]
-OidcTokenAuthMethod = Literal["client_secret_post", "client_secret_basic"]
+OidcTokenAuthMethod = Literal["client_secret_post", "client_secret_basic", "none"]
 
 
 class WebSettings(BaseModel):
@@ -65,10 +65,10 @@ class WebSettings(BaseModel):
             "XRAY_OIDC_TOKEN_AUTH_METHOD",
             "client_secret_post",
         ).strip().casefold()
-        if oidc_token_auth_method not in {"client_secret_post", "client_secret_basic"}:
+        if oidc_token_auth_method not in {"client_secret_post", "client_secret_basic", "none"}:
             raise ValueError(
-                "XRAY_OIDC_TOKEN_AUTH_METHOD must be client_secret_post "
-                "or client_secret_basic"
+                "XRAY_OIDC_TOKEN_AUTH_METHOD must be client_secret_post, "
+                "client_secret_basic, or none"
             )
         oidc_token_auth_method_name = cast(
             OidcTokenAuthMethod,

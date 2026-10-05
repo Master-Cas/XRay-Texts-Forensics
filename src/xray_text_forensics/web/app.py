@@ -634,14 +634,17 @@ def _readiness(
 
 
 def _validate_oidc_settings(settings: WebSettings) -> None:
+    required = [
+        ("XRAY_PUBLIC_BASE_URL", settings.public_base_url),
+        ("XRAY_OIDC_ISSUER_URL", settings.oidc_issuer_url),
+        ("XRAY_OIDC_CLIENT_ID", settings.oidc_client_id),
+    ]
+    if settings.oidc_token_auth_method != "none":
+        required.append(("XRAY_OIDC_CLIENT_SECRET", settings.oidc_client_secret))
+
     missing = [
         name
-        for name, value in (
-            ("XRAY_PUBLIC_BASE_URL", settings.public_base_url),
-            ("XRAY_OIDC_ISSUER_URL", settings.oidc_issuer_url),
-            ("XRAY_OIDC_CLIENT_ID", settings.oidc_client_id),
-            ("XRAY_OIDC_CLIENT_SECRET", settings.oidc_client_secret),
-        )
+        for name, value in required
         if not value
     ]
     if missing:
@@ -661,7 +664,6 @@ def _validate_oidc_settings(settings: WebSettings) -> None:
 def _oidc_client(settings: WebSettings) -> GenericOidcClient:
     assert settings.oidc_issuer_url is not None
     assert settings.oidc_client_id is not None
-    assert settings.oidc_client_secret is not None
     return GenericOidcClient(
         issuer_url=settings.oidc_issuer_url,
         client_id=settings.oidc_client_id,
