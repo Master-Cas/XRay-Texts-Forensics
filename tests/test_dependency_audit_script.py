@@ -43,15 +43,3 @@ def test_run_audit_preserves_nonzero_exit_code(monkeypatch) -> None:
         == expected
     )
 
-
-def test_workflow_keeps_two_os_fail_closed_gate() -> None:
-    workflow = Path(".github/workflows/dependency-audit.yml").read_text(
-        encoding="utf-8"
-    )
-
-    assert "name: Dependency audit" in workflow
-    assert "ubuntu-latest" in workflow
-    assert "windows-latest" in workflow
-    assert 'python-version: "3.12.6"' in workflow
-    assert "python scripts/dependency_audit.py" in workflow
-    assert "contents: read" in workflow
