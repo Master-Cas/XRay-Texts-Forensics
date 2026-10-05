@@ -87,6 +87,7 @@ printf 'Deploying XTF Web SHA %s to %s\n' "$sha" "$DEPLOY_TARGET"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_TARGET" \
   "flock -n '$REMOTE_LOCK' bash -s -- '$sha'" <<'REMOTE_SCRIPT'
 set -euo pipefail
+umask 077
 
 sha="$1"
 repository_url="https://github.com/Master-Cas/XRay-Texts-Forensics.git"
@@ -152,7 +153,8 @@ if [[ "$current_sha" == "$sha" && "$running_image" == "$image" && "$running_heal
   exit 0
 fi
 
-mkdir -p "$releases_root" "$backups_root"
+mkdir -p "$releases_root"
+install -d -m 0700 "$backups_root"
 if [[ ! -d "$release/.git" ]]; then
   [[ ! -e "$release" ]] || fail "release path exists but is not a Git checkout: $release"
   git clone --quiet "$repository_url" "$release"
@@ -176,42 +178,91 @@ assert importlib.metadata.version("xray-texts-forensics")
 '
 log "Image smoke passed: $image"
 
+compose_service_image() {
+  sudo -n docker compose "$@" config --format json |
+    python3 -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+service = sys.argv[1]
+image = payload.get("services", {}).get(service, {}).get("image")
+if not isinstance(image, str) or not image:
+    raise SystemExit(1)
+print(image)
+' "$service"
+}
+
 old_current="$(readlink -f "$current_link")"
 old_image="$(sudo -n docker inspect "$container" --format '{{.Config.Image}}')"
-timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-backup_dir="$backups_root/$timestamp"
-mkdir -p "$backup_dir"
-cp -a "$compose_file" "$backup_dir/compose.yaml"
-printf '%s\n' "$old_current" > "$backup_dir/current.target"
-printf '%s\n' "$old_image" > "$backup_dir/previous-image.txt"
+restore_compose_args=(-f "$compose_file")
 if [[ -f "$runtime_override" ]]; then
-  cp -a "$runtime_override" "$backup_dir/compose.release.yaml"
   previous_override=1
+  restore_compose_args+=(-f "$runtime_override")
 else
   previous_override=0
+fi
+resolved_old_image="$(compose_service_image "${restore_compose_args[@]}")"
+[[ "$resolved_old_image" == "$old_image" ]] ||
+  fail "pre-cutover compose image does not match running image"
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_dir="$backups_root/$timestamp"
+install -d -m 0700 "$backup_dir"
+install -m 0600 "$compose_file" "$backup_dir/compose.yaml"
+printf '%s\n' "$old_current" > "$backup_dir/current.target"
+printf '%s\n' "$old_image" > "$backup_dir/previous-image.txt"
+chmod 0600 "$backup_dir/current.target" "$backup_dir/previous-image.txt"
+if (( previous_override )); then
+  install -m 0600 "$runtime_override" "$backup_dir/compose.release.yaml"
 fi
 
 cutover_started=0
 rollback() {
   local rc="$?"
+  local rollback_failed=0
+  local restored_image=""
+  local restored_resolved_image=""
+  local state="unknown"
   trap - ERR
   if (( cutover_started )); then
     log "Cutover failed; restoring prior XTF release/config."
     ln -sfn "$old_current" "$current_link"
     if (( previous_override )); then
-      cp -a "$backup_dir/compose.release.yaml" "$runtime_override"
+      install -m 0600 "$backup_dir/compose.release.yaml" "$runtime_override"
     else
       rm -f "$runtime_override"
     fi
-    compose_args=(-f "$compose_file")
-    [[ -f "$runtime_override" ]] && compose_args+=(-f "$runtime_override")
-    sudo -n docker compose "${compose_args[@]}" up -d --no-deps "$service" >/dev/null || true
-    for _ in $(seq 1 30); do
-      state="$(sudo -n docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
-      [[ "$state" == "healthy" ]] && break
-      sleep 2
-    done
-    log "Rollback container state: ${state:-unknown}"
+
+    restore_compose_args=(-f "$compose_file")
+    [[ -f "$runtime_override" ]] && restore_compose_args+=(-f "$runtime_override")
+    restored_resolved_image="$(compose_service_image "${restore_compose_args[@]}" 2>/dev/null || true)"
+    if [[ "$restored_resolved_image" != "$old_image" ]]; then
+      log "ROLLBACK FAILED: restored Compose resolves '$restored_resolved_image', expected '$old_image'."
+      rollback_failed=1
+    elif ! sudo -n docker compose "${restore_compose_args[@]}" up -d --no-deps "$service" >/dev/null; then
+      log "ROLLBACK FAILED: docker compose could not restore XTF."
+      rollback_failed=1
+    else
+      for _ in $(seq 1 30); do
+        state="$(sudo -n docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+        [[ "$state" == "healthy" ]] && break
+        sleep 2
+      done
+      restored_image="$(sudo -n docker inspect "$container" --format '{{.Config.Image}}' 2>/dev/null || true)"
+      if [[ "$restored_image" != "$old_image" ]]; then
+        log "ROLLBACK FAILED: restored container image '$restored_image', expected '$old_image'."
+        rollback_failed=1
+      fi
+      if [[ "$state" != "healthy" ]]; then
+        log "ROLLBACK FAILED: restored container state is '${state:-unknown}'."
+        rollback_failed=1
+      fi
+    fi
+    if (( rollback_failed )); then
+      log "ROLLBACK FAILED: manual recovery is required."
+    else
+      log "Rollback verified: image=$old_image state=healthy"
+    fi
   fi
   exit "$rc"
 }
@@ -220,9 +271,9 @@ trap rollback ERR
 log "Stopping only XTF for a consistent data backup."
 sudo -n docker stop "$container" >/dev/null
 cutover_started=1
-sudo -n tar --numeric-owner -C /var/lib -czf "$backup_dir/xtf-data.tgz" xtf
-sudo -n chown "$(id -u):$(id -g)" "$backup_dir/xtf-data.tgz"
-log "Consistent data backup created: $backup_dir/xtf-data.tgz"
+sudo -n tar --numeric-owner -C /var/lib -czf - xtf > "$backup_dir/xtf-data.tgz"
+chmod 0600 "$backup_dir/xtf-data.tgz"
+log "Consistent private data backup created: $backup_dir/xtf-data.tgz"
 
 override_tmp="$runtime_override.tmp.$$"
 cat > "$override_tmp" <<EOF
@@ -233,6 +284,7 @@ services:
       XRAY_BUILD_SHA: "$sha"
 EOF
 mv "$override_tmp" "$runtime_override"
+chmod 0600 "$runtime_override"
 ln -sfn "$release" "$current_link"
 
 compose_args=(-f "$compose_file" -f "$runtime_override")
