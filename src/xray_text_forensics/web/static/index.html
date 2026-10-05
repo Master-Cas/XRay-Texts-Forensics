@@ -47,7 +47,7 @@
           <div>
             <p class="eyebrow">Quick Scan</p>
             <h1 id="scan-title">Inspect a text artifact</h1>
-            <p>Preserve the original bytes, then expose deterministic Unicode evidence.</p>
+            <p>Preserve the original bytes, then run Unicode, linguistic, stylometric and provenance checks without collapsing them into a fake AI score.</p>
           </div>
         </div>
 
@@ -58,7 +58,7 @@
             <span>TXT, Markdown, JSON, CSV, HTML, DOCX or PDF</span>
             <input id="scan-file" name="file" type="file" required>
           </label>
-          <button class="primary-button" type="submit">Analyze Unicode</button>
+          <button class="primary-button" type="submit">Run full forensic scan</button>
         </form>
 
         <div id="scan-progress" class="progress-message" hidden></div>
@@ -66,24 +66,50 @@
           <h2>Artifact</h2>
           <div id="artifact-cards" class="metric-grid"></div>
 
+          <section class="interpretation-card origin-card" aria-labelledby="origin-title">
+            <div class="interpretation-heading">
+              <p class="eyebrow">Overall forensic result</p>
+              <span id="origin-badge" class="status"></span>
+            </div>
+            <h2 id="origin-title"></h2>
+            <p id="origin-text" class="interpretation-lead"></p>
+            <div id="family-cards" class="family-grid"></div>
+            <p class="scientific-note">
+              XRay keeps Unicode, linguistic, stylometric, watermark and provenance signals
+              separate. Missing tests are reported as unavailable, never as negative evidence.
+            </p>
+          </section>
+
+          <section id="reference-results" class="interpretation-card" hidden>
+            <div class="interpretation-heading">
+              <p class="eyebrow">Reference-corpus comparison</p>
+              <span class="status status-good">Comparative evidence</span>
+            </div>
+            <h2>Closest reference sets</h2>
+            <p class="interpretation-lead">
+              Similarity is shown separately for style, character patterns and content.
+              These values are not provider or authorship probabilities.
+            </p>
+            <div id="reference-cards" class="reference-grid"></div>
+          </section>
+
           <section class="interpretation-card" aria-labelledby="plain-summary-title">
             <div class="interpretation-heading">
-              <p class="eyebrow">Plain-language result</p>
+              <p class="eyebrow">Unicode result</p>
               <span id="plain-summary-badge" class="status"></span>
             </div>
-            <h2 id="plain-summary-title">What this scan means</h2>
+            <h2 id="plain-summary-title">What the Unicode checks mean</h2>
             <p id="plain-summary-text" class="interpretation-lead"></p>
             <ul id="plain-findings" class="plain-findings"></ul>
             <p class="scientific-note">
-              These checks describe Unicode properties. By themselves, they do not prove
-              AI authorship, watermarking, manipulation or intent.
+              Unicode checks describe how text is encoded. They do not identify who wrote it.
             </p>
           </section>
 
           <details class="technical-details">
-            <summary>Show technical evidence</summary>
+            <summary>Show technical Unicode evidence</summary>
             <div class="result-toolbar">
-              <h2>Technical evidence</h2>
+              <h2>Technical Unicode evidence</h2>
               <span id="evidence-count" class="pill"></span>
             </div>
             <div class="table-wrap">
