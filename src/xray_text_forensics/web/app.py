@@ -310,7 +310,7 @@ def create_app(
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse()
+        return HealthResponse(build_sha=settings.build_sha)
 
     @app.get("/api/v1/ready", response_model=None)
     def ready() -> JSONResponse:
@@ -779,6 +779,7 @@ def _readiness(
         checks=checks,
         schema_version=schema_version,
         environment=settings.environment,
+        build_sha=settings.build_sha,
     )
 
 

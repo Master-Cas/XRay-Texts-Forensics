@@ -25,6 +25,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "xray-texts-forensics"
     api_version: str = "v1"
+    build_sha: str | None = None
 
 
 class ReadinessResponse(BaseModel):
@@ -32,6 +33,7 @@ class ReadinessResponse(BaseModel):
     checks: dict[str, str]
     schema_version: int | None = None
     environment: str
+    build_sha: str | None = None
 
 
 class JobResponse(BaseModel):

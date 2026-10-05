@@ -38,6 +38,7 @@ class WebSettings(BaseModel):
     oidc_allow_personal_tenant: bool = True
     oidc_token_auth_method: OidcTokenAuthMethod = "client_secret_post"
     reference_root: Path | None = None
+    build_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
     @property
     def object_store_root(self) -> Path:
@@ -113,6 +114,11 @@ class WebSettings(BaseModel):
             reference_root=(
                 Path(os.environ["XRAY_REFERENCE_ROOT"])
                 if os.environ.get("XRAY_REFERENCE_ROOT")
+                else None
+            ),
+            build_sha=(
+                os.environ["XRAY_BUILD_SHA"].strip()
+                if os.environ.get("XRAY_BUILD_SHA")
                 else None
             ),
         )
