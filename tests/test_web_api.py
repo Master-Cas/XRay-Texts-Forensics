@@ -257,9 +257,18 @@ def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
         b"My coat was wet. The shop was closed. I waited under the old awning.",
     ]
     model_samples = [
-        b"Across the quiet valley, a lantern glowed while the traveler considered the long journey ahead.",
-        b"Beneath the evening sky, the river reflected a gentle light as the traveler crossed the forest.",
-        b"Within the silent garden, every path invited another careful step toward the distant horizon.",
+        (
+            b"Across the quiet valley, a lantern glowed while the traveler "
+            b"considered the long journey ahead."
+        ),
+        (
+            b"Beneath the evening sky, the river reflected a gentle light "
+            b"as the traveler crossed the forest."
+        ),
+        (
+            b"Within the silent garden, every path invited another careful "
+            b"step toward the distant horizon."
+        ),
     ]
 
     for index, sample in enumerate(human_samples):
