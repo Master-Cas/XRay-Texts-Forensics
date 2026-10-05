@@ -65,18 +65,36 @@
         <section id="scan-summary" class="result-section" hidden>
           <h2>Artifact</h2>
           <div id="artifact-cards" class="metric-grid"></div>
-          <div class="result-toolbar">
-            <h2>Evidence</h2>
-            <span id="evidence-count" class="pill"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Finding</th><th>Status</th><th>Count / detail</th><th>Detector</th></tr>
-              </thead>
-              <tbody id="evidence-body"></tbody>
-            </table>
-          </div>
+
+          <section class="interpretation-card" aria-labelledby="plain-summary-title">
+            <div class="interpretation-heading">
+              <p class="eyebrow">Plain-language result</p>
+              <span id="plain-summary-badge" class="status"></span>
+            </div>
+            <h2 id="plain-summary-title">What this scan means</h2>
+            <p id="plain-summary-text" class="interpretation-lead"></p>
+            <ul id="plain-findings" class="plain-findings"></ul>
+            <p class="scientific-note">
+              These checks describe Unicode properties. By themselves, they do not prove
+              AI authorship, watermarking, manipulation or intent.
+            </p>
+          </section>
+
+          <details class="technical-details">
+            <summary>Show technical evidence</summary>
+            <div class="result-toolbar">
+              <h2>Technical evidence</h2>
+              <span id="evidence-count" class="pill"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Finding</th><th>Status</th><th>Count / detail</th><th>Detector</th></tr>
+                </thead>
+                <tbody id="evidence-body"></tbody>
+              </table>
+            </div>
+          </details>
         </section>
       </section>
 
