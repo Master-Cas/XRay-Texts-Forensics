@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 import sqlite3
 import time
 from threading import Event
@@ -204,3 +205,18 @@ def test_compare_transform_background_job_api(tmp_path) -> None:
     assert payload["result"]["fivegram_survival"] == 1.0
     assert payload["result"]["lexical_tfidf_cosine"] == 1.0
     assert payload["error"] is None
+
+
+def test_dependency_audit_workflow_is_cross_platform_and_fail_closed() -> None:
+    workflow = Path(".github/workflows/dependency-audit.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "name: Dependency audit" in workflow
+    assert "pull_request:" in workflow
+    assert "push:" in workflow
+    assert "ubuntu-latest" in workflow
+    assert "windows-latest" in workflow
+    assert 'python-version: "3.12.6"' in workflow
+    assert "python scripts/dependency_audit.py" in workflow
+    assert "contents: read" in workflow
