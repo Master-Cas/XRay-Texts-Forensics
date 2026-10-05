@@ -116,3 +116,110 @@ def test_case_workflow_and_safe_reports(tmp_path) -> None:
 def test_missing_case_returns_404(tmp_path) -> None:
     response = client(tmp_path).get("/api/v1/cases/case_does_not_exist")
     assert response.status_code == 404
+
+
+def test_full_scan_exposes_multiple_evidence_families(tmp_path) -> None:
+    response = client(tmp_path).post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "story.txt",
+                (
+                    "The small star crossed the quiet sky. "
+                    "It stopped above the forest and listened to the river. "
+                    "Then it returned home with a different light."
+                ).encode(),
+                "text/plain",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["unicode_evidence"]
+    assert payload["linguistic_snapshot"]["token_count"] > 0
+    assert payload["style_fingerprint"]["sentence_count"] == 3
+
+    families = {item["family"]: item for item in payload["family_summaries"]}
+    assert families["unicode"]["state"] == "COMPLETE"
+    assert families["linguistic_profile"]["state"] in {"COMPLETE", "INSUFFICIENT_DATA"}
+    assert families["reference_stylometry"]["state"] == "NOT_TESTABLE"
+    assert families["watermark"]["state"] == "NOT_TESTABLE"
+    assert payload["origin_assessment"]["state"] == "NOT_TESTABLE"
+    assert payload["reference_comparison"] is None
+
+
+def test_full_scan_uses_configured_reference_corpora(tmp_path) -> None:
+    references = tmp_path / "references"
+    human = references / "human-reference"
+    model = references / "model-reference"
+    human.mkdir(parents=True)
+    model.mkdir(parents=True)
+
+    (human / ".xray-reference.json").write_text(
+        '{"label":"human-reference","source":"synthetic-test","language":"en"}',
+        encoding="utf-8",
+    )
+    (model / ".xray-reference.json").write_text(
+        '{"label":"model-reference","source":"synthetic-test","language":"en"}',
+        encoding="utf-8",
+    )
+
+    human_samples = [
+        "I walked home. Rain fell. The bus was late. I made tea.",
+        "We met outside. She laughed. I forgot my keys. We waited.",
+        "My dog barked. I opened the door. The street was quiet.",
+    ]
+    model_samples = [
+        (
+            "Across the quiet valley, the lantern remained visible while the traveler "
+            "considered the meaning of the long and carefully described journey."
+        ),
+        (
+            "Beneath the evening sky, the river reflected a gentle light while the "
+            "traveler continued through the forest with deliberate patience."
+        ),
+        (
+            "Within the silent garden, every path seemed to invite another thoughtful "
+            "step toward a distant and softly illuminated horizon."
+        ),
+    ]
+    for index, sample in enumerate(human_samples):
+        (human / f"{index}.txt").write_text(sample, encoding="utf-8")
+    for index, sample in enumerate(model_samples):
+        (model / f"{index}.txt").write_text(sample, encoding="utf-8")
+
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "web-data",
+            reference_root=references,
+        )
+    )
+    web = TestClient(app)
+    response = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                model_samples[0].encode(),
+                "text/plain",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["origin_assessment"]["state"] == "REFERENCE_COMPARISON"
+    assert payload["reference_comparison"] is not None
+    labels = {
+        row["label"]
+        for row in payload["reference_comparison"]["comparisons"]
+    }
+    assert labels == {"human-reference", "model-reference"}
+
+    family = {
+        item["family"]: item
+        for item in payload["family_summaries"]
+    }["reference_stylometry"]
+    assert family["state"] == "COMPLETE"
+    assert "not provider probabilities" in family["summary"].casefold()
