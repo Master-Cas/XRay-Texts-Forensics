@@ -17,6 +17,7 @@ _EXTENSION_TYPES = {
     ".htm": "text/html",
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".odt": "application/vnd.oasis.opendocument.text",
 }
 
 TEXTUAL_MEDIA_TYPES = frozenset(
@@ -38,6 +39,9 @@ def detect_media_type(data: bytes, filename: str | None = None) -> str:
 
     if _looks_like_docx(data):
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    if _looks_like_odt(data):
+        return "application/vnd.oasis.opendocument.text"
 
     sample = data[:8192]
     ascii_sample = sample.decode("ascii", errors="ignore").lstrip()
@@ -64,3 +68,22 @@ def _looks_like_docx(data: bytes) -> bool:
     except (OSError, zipfile.BadZipFile):
         return False
     return "word/document.xml" in names
+
+
+def _looks_like_odt(data: bytes) -> bool:
+    if not data.startswith(b"PK"):
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = set(archive.namelist())
+            if "content.xml" not in names:
+                return False
+            try:
+                mimetype = archive.read("mimetype").decode("ascii", errors="strict").strip()
+            except (KeyError, UnicodeDecodeError):
+                mimetype = ""
+    except (OSError, zipfile.BadZipFile):
+        return False
+    return mimetype == "application/vnd.oasis.opendocument.text" or (
+        "META-INF/manifest.xml" in names
+    )
