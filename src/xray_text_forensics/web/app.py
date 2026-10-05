@@ -334,17 +334,21 @@ def create_app(
             acquisition_method="web-upload",
             source_declared="web-upload",
         )
-        tenant_comparator, tenant_warning_count = reference_library.comparator_for(storage)
-        comparator = tenant_comparator or reference_comparator
-        warning_count = (
-            tenant_warning_count
-            if tenant_comparator is not None or tenant_warning_count
-            else reference_warning_count
-        )
+        tenant_reference = reference_library.comparator_for(storage)
+        if tenant_reference.configured:
+            comparator = tenant_reference.comparator
+            warning_count = tenant_reference.warning_count
+            unavailable_reason = tenant_reference.unavailable_reason
+        else:
+            comparator = reference_comparator
+            warning_count = reference_warning_count
+            unavailable_reason = None
+
         return run_full_scan(
             result,
             comparator=comparator,
             reference_warning_count=warning_count,
+            reference_unavailable_reason=unavailable_reason,
         )
 
     @app.get("/api/v1/references", response_model=list[ReferenceSetSummary])

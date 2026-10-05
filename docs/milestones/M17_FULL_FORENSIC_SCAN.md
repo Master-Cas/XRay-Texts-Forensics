@@ -130,6 +130,18 @@ and upload multiple known-origin samples to each set.
 
 Reference uploads are content-deduplicated by SHA-256.
 
+Reference comparison is gated conservatively:
+
+- at least **2** distinct reference sets;
+- at least **5 usable documents per set** after ingestion.
+
+Five documents is an activation floor for the product, not a claim that five samples are
+scientifically sufficient for provider attribution. Serious benchmarking should use larger,
+topic-diverse, versioned corpora and held-out evaluation.
+
+If the gate is not met, the Full Scan returns `NOT_TESTABLE` for reference comparison and
+explains how many sets are ready.
+
 ## Product interpretation
 
 The Web UI presents:

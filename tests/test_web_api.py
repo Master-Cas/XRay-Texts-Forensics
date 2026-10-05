@@ -255,6 +255,8 @@ def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
         b"I got home late. The kettle was cold. I fed the cat and went to bed.",
         b"We missed the bus. Sam laughed. I called my sister and walked home.",
         b"My coat was wet. The shop was closed. I waited under the old awning.",
+        b"I lost my ticket. The driver waited. I found it inside my coat.",
+        b"We ate outside. The coffee was hot. Then the rain started again.",
     ]
     model_samples = [
         (
@@ -268,6 +270,14 @@ def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
         (
             b"Within the silent garden, every path invited another careful "
             b"step toward the distant horizon."
+        ),
+        (
+            b"Beyond the sleeping village, the traveler watched the pale moon "
+            b"rise over a landscape filled with quiet possibility."
+        ),
+        (
+            b"Along the ancient road, a soft wind carried distant sounds while "
+            b"the traveler continued toward the glowing edge of morning."
         ),
     ]
 
@@ -288,8 +298,8 @@ def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
     listed = web.get("/api/v1/references")
     assert listed.status_code == 200
     by_label = {item["label"]: item for item in listed.json()}
-    assert by_label["Human stories"]["document_count"] == 3
-    assert by_label["Model stories"]["document_count"] == 3
+    assert by_label["Human stories"]["document_count"] == 5
+    assert by_label["Model stories"]["document_count"] == 5
 
     scan = web.post(
         "/api/v1/analyze/full",
@@ -312,6 +322,56 @@ def test_reference_library_drives_full_scan_comparison(tmp_path) -> None:
         row["label"]
         for row in payload["reference_comparison"]["comparisons"]
     } == {"Human stories", "Model stories"}
+
+
+
+
+def test_reference_comparison_waits_for_minimum_corpus(tmp_path) -> None:
+    web = client(tmp_path)
+    slugs = []
+    for label in ("Human", "Claude"):
+        created = web.post(
+            "/api/v1/references",
+            json={"label": label, "source": "controlled-test"},
+        )
+        assert created.status_code == 200
+        slugs.append(created.json()["slug"])
+
+    for slug in slugs:
+        for index in range(2):
+            uploaded = web.post(
+                f"/api/v1/references/{slug}/documents",
+                files={
+                    "file": (
+                        f"{slug}-{index}.txt",
+                        f"Known origin sample {slug} number {index}.".encode(),
+                        "text/plain",
+                    )
+                },
+            )
+            assert uploaded.status_code == 200
+
+    scan = web.post(
+        "/api/v1/analyze/full",
+        files={
+            "file": (
+                "suspect.txt",
+                b"This is a suspect document with enough words for a basic scan.",
+                "text/plain",
+            )
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    payload = scan.json()
+    assert payload["origin_assessment"]["state"] == "NOT_TESTABLE"
+    assert payload["reference_comparison"] is None
+    family = {
+        item["family"]: item
+        for item in payload["family_summaries"]
+    }["reference_stylometry"]
+    assert family["state"] == "NOT_TESTABLE"
+    assert "5 usable samples each" in family["summary"]
+    assert "Ready sets: 0/2" in family["summary"]
 
 
 def test_reference_document_upload_is_content_deduplicated(tmp_path) -> None:

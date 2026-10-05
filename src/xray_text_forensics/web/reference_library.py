@@ -9,19 +9,26 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from xray_text_forensics.corpus.loaders import load_directory
 from xray_text_forensics.ingest import ForensicIngestor, IngestPolicy
 from xray_text_forensics.storage import ContentAddressedStore
-from xray_text_forensics.stylometry import ReferenceComparator, ReferenceMetadata
-from xray_text_forensics.stylometry.loaders import load_reference_root
+from xray_text_forensics.stylometry import (
+    ReferenceComparator,
+    ReferenceMetadata,
+    ReferenceSet,
+)
 
 from .tenant_storage import TenantStorage
 
 _ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".csv", ".html", ".docx", ".pdf"}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_MIN_REFERENCE_SETS = 2
+_MIN_DOCUMENTS_PER_SET = 5
 
 
 class ReferenceSetCreate(BaseModel):
@@ -53,6 +60,14 @@ class ReferenceDocumentResponse(BaseModel):
     filename: str
     sha256: str
     added: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceComparatorState:
+    comparator: ReferenceComparator | None
+    warning_count: int
+    unavailable_reason: str | None
+    configured: bool
 
 
 class TenantReferenceLibrary:
@@ -157,20 +172,87 @@ class TenantReferenceLibrary:
     def comparator_for(
         self,
         storage: TenantStorage,
-    ) -> tuple[ReferenceComparator | None, int]:
+    ) -> ReferenceComparatorState:
         sets = self.list_sets(storage)
-        if not sets or all(item.document_count == 0 for item in sets):
-            return None, 0
+        if not sets:
+            return ReferenceComparatorState(
+                comparator=None,
+                warning_count=0,
+                unavailable_reason=None,
+                configured=False,
+            )
+
+        eligible = [
+            item
+            for item in sets
+            if item.document_count >= _MIN_DOCUMENTS_PER_SET
+        ]
+        if len(eligible) < _MIN_REFERENCE_SETS:
+            return ReferenceComparatorState(
+                comparator=None,
+                warning_count=0,
+                unavailable_reason=(
+                    "Reference comparison needs at least "
+                    f"{_MIN_REFERENCE_SETS} reference sets with "
+                    f"{_MIN_DOCUMENTS_PER_SET} usable samples each. "
+                    f"Ready sets: {len(eligible)}/{_MIN_REFERENCE_SETS}."
+                ),
+                configured=True,
+            )
 
         ingestor = ForensicIngestor(
             ContentAddressedStore(storage.reference_object_store_root),
             IngestPolicy(max_input_bytes=self.max_input_bytes),
         )
+        references: list[ReferenceSet] = []
+        warnings: list[str] = []
+        for summary in eligible:
+            directory = storage.reference_root / summary.slug
+            metadata = self._read_metadata(directory)
+            if metadata is None:
+                warnings.append(f"{summary.slug}: metadata unavailable")
+                continue
+            documents, corpus_warnings = load_directory(directory, ingestor)
+            warnings.extend(corpus_warnings)
+            if len(documents) < _MIN_DOCUMENTS_PER_SET:
+                warnings.append(
+                    f"{summary.slug}: only {len(documents)} usable samples after ingestion"
+                )
+                continue
+            references.append(
+                ReferenceSet(
+                    metadata=metadata,
+                    documents=documents,
+                )
+            )
+
+        if len(references) < _MIN_REFERENCE_SETS:
+            return ReferenceComparatorState(
+                comparator=None,
+                warning_count=len(warnings),
+                unavailable_reason=(
+                    "Reference samples were configured, but fewer than "
+                    f"{_MIN_REFERENCE_SETS} sets retained "
+                    f"{_MIN_DOCUMENTS_PER_SET} usable samples after ingestion."
+                ),
+                configured=True,
+            )
+
         try:
-            references, warnings = load_reference_root(storage.reference_root, ingestor)
-            return ReferenceComparator(references), len(warnings)
-        except (OSError, ValueError):
-            return None, 1
+            comparator = ReferenceComparator(references)
+        except ValueError:
+            return ReferenceComparatorState(
+                comparator=None,
+                warning_count=len(warnings) + 1,
+                unavailable_reason="The reference library could not build a comparison model.",
+                configured=True,
+            )
+        return ReferenceComparatorState(
+            comparator=comparator,
+            warning_count=len(warnings),
+            unavailable_reason=None,
+            configured=True,
+        )
 
     def _resolve_set(self, storage: TenantStorage, set_slug: str) -> Path:
         if set_slug != _slugify(set_slug):
