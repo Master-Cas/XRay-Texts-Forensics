@@ -197,6 +197,54 @@ function referenceSubtitle(item) {
   return parts.length ? parts.join(" · ") : "Known-origin reference set";
 }
 
+function renderGlobalReferenceStatus(status) {
+  const container = $("global-reference-list");
+  const count = $("global-reference-count");
+  const note = $("global-reference-status");
+  const sets = status.global_sets || [];
+
+  container.replaceChildren();
+  count.textContent =
+    String(sets.length) + " set" + (sets.length === 1 ? "" : "s") +
+    " · " + String(status.total_global_documents || 0) + " samples";
+
+  if (sets.length === 0) {
+    note.textContent =
+      "No deployment-wide reference baseline is loaded. Origin comparison will rely on ready private references only.";
+    return;
+  }
+
+  note.textContent =
+    "These deployment-wide corpora are used automatically. Ready private reference sets are layered on top; incomplete private sets never disable the global baseline.";
+
+  for (const item of sets) {
+    const card = document.createElement("article");
+    card.className = "reference-library-card";
+
+    const header = document.createElement("div");
+    header.className = "reference-library-heading";
+
+    const headingText = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.label;
+    const subtitle = document.createElement("span");
+    subtitle.textContent = referenceSubtitle(item);
+    headingText.append(title, subtitle);
+
+    const badge = document.createElement("span");
+    badge.className = "status status-good";
+    badge.textContent = String(item.document_count) + " samples · global";
+    header.append(headingText, badge);
+
+    const source = document.createElement("p");
+    source.textContent = "Source: " + item.source;
+
+    card.append(header, source);
+    container.append(card);
+  }
+}
+
+
 function renderReferenceSets(sets) {
   const container = $("reference-list");
   const count = $("reference-set-count");
@@ -242,7 +290,7 @@ function renderReferenceSets(sets) {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
-    input.accept = ".txt,.md,.json,.csv,.html,.docx,.pdf";
+    input.accept = ".txt,.md,.json,.csv,.html,.docx,.odt,.pdf";
     input.required = true;
 
     const button = document.createElement("button");
@@ -282,8 +330,9 @@ function renderReferenceSets(sets) {
 }
 
 async function loadReferenceSets() {
-  const sets = await jsonRequest(api + "/references");
-  renderReferenceSets(sets || []);
+  const status = await jsonRequest(api + "/references/status");
+  renderGlobalReferenceStatus(status);
+  renderReferenceSets(status.tenant_sets || []);
 }
 
 const evidenceLanguage = {
