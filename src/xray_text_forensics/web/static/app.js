@@ -95,11 +95,147 @@ function fillMetrics(container, metrics) {
   }
 }
 
+const evidenceLanguage = {
+  ZERO_WIDTH_CHARACTER: {
+    title: "Hidden zero-width characters",
+    detected: "Invisible zero-width characters are present. They can be legitimate, but because they are normally unseen they deserve review.",
+    clear: "No hidden zero-width characters were found.",
+  },
+  BIDI_CONTROL: {
+    title: "Text-direction controls",
+    detected: "Characters that can change the visual reading order of text were found. Review where they appear, because what is displayed can differ from the stored order.",
+    clear: "No text-direction control characters were found.",
+  },
+  UNICODE_TAG_CHARACTER: {
+    title: "Invisible Unicode tag characters",
+    detected: "Invisible Unicode tag characters are present. They are uncommon in ordinary prose and should be reviewed in context.",
+    clear: "No invisible Unicode tag characters were found.",
+  },
+  VARIATION_SELECTOR: {
+    title: "Glyph variation selectors",
+    detected: "Characters that request a different visual form for a symbol were found. They are often legitimate, especially around symbols or emoji.",
+    clear: "No glyph variation selectors were found.",
+  },
+  SPACE_VARIANT: {
+    title: "Non-standard spaces",
+    detected: "The text contains spaces other than the ordinary keyboard space. This may come from typography, copy/paste or document formatting and is not suspicious by itself.",
+    clear: "No non-standard spacing characters were found.",
+  },
+  CONTROL_CHARACTER: {
+    title: "Non-standard control characters",
+    detected: "Control characters outside normal tabs and line breaks were found. They may affect software processing even when they are hard to see.",
+    clear: "No non-standard control characters were found.",
+  },
+  FORMAT_CONTROL_OTHER: {
+    title: "Other invisible formatting controls",
+    detected: "Other Unicode formatting-control characters were found. Their meaning depends on where they occur, so the locations should be reviewed.",
+    clear: "No other invisible formatting controls were found.",
+  },
+  SUSPICIOUS_COMBINING_SEQUENCE: {
+    title: "Unusual combining marks",
+    detected: "An unusual sequence of combining marks was found. These marks can alter how nearby characters are displayed and should be checked in context.",
+    clear: "No unusual combining-mark sequences were found.",
+  },
+  NORMALIZATION_DIFFERENCE: {
+    title: "Unicode representation changes after normalization",
+    detected: "Some characters change to an equivalent Unicode representation when normalized. This can happen in ordinary text and is not evidence of manipulation by itself.",
+    clear: "The text keeps the same representation across the Unicode normalization checks.",
+  },
+  MIXED_SCRIPT_TOKEN: {
+    title: "Words mixing look-alike alphabets",
+    detected: "At least one word mixes Latin, Cyrillic or Greek characters. This can be legitimate, but it can also be used to substitute look-alike letters.",
+    clear: "No words mixing Latin, Cyrillic and Greek characters were found.",
+  },
+};
+
+const descriptiveFindings = new Set([
+  "NORMALIZATION_DIFFERENCE",
+  "SPACE_VARIANT",
+  "VARIATION_SELECTOR",
+]);
+
+function evidenceLabel(finding) {
+  const copy = evidenceLanguage[finding];
+  return copy ? copy.title : String(finding || "Unknown finding").replaceAll("_", " ");
+}
+
 function statusCell(status) {
   const span = document.createElement("span");
-  span.textContent = status;
-  span.className = status === "DETECTED" ? "evidence-detected" : "evidence-clear";
+  if (status === "DETECTED") {
+    span.textContent = "Found";
+    span.className = "evidence-detected";
+  } else if (status === "NOT_TESTABLE") {
+    span.textContent = "Not testable";
+    span.className = "evidence-untested";
+  } else {
+    span.textContent = "Not found";
+    span.className = "evidence-clear";
+  }
+  span.title = status;
   return span;
+}
+
+function renderPlainLanguageEvidence(rows) {
+  const badge = $("plain-summary-badge");
+  const summary = $("plain-summary-text");
+  const list = $("plain-findings");
+  list.replaceChildren();
+
+  const detected = rows.filter((item) => item.status === "DETECTED");
+  const notTestable = rows.filter((item) => item.status === "NOT_TESTABLE");
+  const review = detected.filter((item) => !descriptiveFindings.has(item.finding));
+
+  if (notTestable.length > 0) {
+    badge.textContent = "Some checks unavailable";
+    badge.className = "status status-warn";
+    summary.textContent = "The scan completed, but some Unicode checks could not be evaluated. Review the technical details before drawing conclusions.";
+  } else if (detected.length === 0) {
+    badge.textContent = "No unusual Unicode patterns found";
+    badge.className = "status status-good";
+    summary.textContent = "None of the Unicode patterns covered by this scan were detected in the document.";
+  } else if (review.length === 0) {
+    badge.textContent = "Technical difference found";
+    badge.className = "status status-warn";
+    summary.textContent = "The scan found a Unicode difference worth explaining, but it did not find the stronger invisible-control or mixed-alphabet patterns covered by these checks.";
+  } else {
+    badge.textContent = "Review recommended";
+    badge.className = "status status-warn";
+    summary.textContent = "The scan found Unicode patterns that deserve contextual review. They are evidence about how the text is encoded, not proof of authorship, intent or manipulation.";
+  }
+
+  for (const item of detected) {
+    const copy = evidenceLanguage[item.finding];
+    const entry = document.createElement("li");
+    const title = document.createElement("strong");
+    const explanation = document.createElement("span");
+    title.textContent = copy ? copy.title : evidenceLabel(item.finding);
+    explanation.textContent = copy
+      ? copy.detected
+      : (item.parameters && item.parameters.interpretation) || item.reason || "A technical Unicode finding was detected.";
+    entry.append(title, explanation);
+    list.append(entry);
+  }
+
+  if (detected.length === 0) {
+    const entry = document.createElement("li");
+    const title = document.createElement("strong");
+    const explanation = document.createElement("span");
+    title.textContent = "Checks completed";
+    explanation.textContent = String(rows.length) + " Unicode checks returned no detected finding.";
+    entry.append(title, explanation);
+    list.append(entry);
+  } else {
+    const clearCount = rows.filter((item) => item.status === "NOT_DETECTED").length;
+    if (clearCount > 0) {
+      const entry = document.createElement("li");
+      const title = document.createElement("strong");
+      const explanation = document.createElement("span");
+      title.textContent = "Other checks";
+      explanation.textContent = String(clearCount) + " additional Unicode checks did not find the patterns they look for.";
+      entry.append(title, explanation);
+      list.append(entry);
+    }
+  }
 }
 
 function evidenceDetail(item) {
@@ -131,7 +267,7 @@ function renderEvidence(rows, body, countTarget, includeId = false) {
     }
 
     const finding = document.createElement("td");
-    finding.textContent = item.finding || "—";
+    finding.textContent = evidenceLabel(item.finding);
     row.append(finding);
 
     if (includeId) {
@@ -180,6 +316,7 @@ async function scanFile(file) {
       { label: "Encoding", value: result.artifact.detected_encoding || "n/a" },
       { label: "Views", value: result.views.length },
     ]);
+    renderPlainLanguageEvidence(result.evidence);
     renderEvidence(result.evidence, $("evidence-body"), $("evidence-count"));
     $("scan-summary").hidden = false;
   } finally {
