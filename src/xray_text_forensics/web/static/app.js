@@ -225,10 +225,11 @@ function renderReferenceSets(sets) {
     headingText.append(title, subtitle);
 
     const badge = document.createElement("span");
-    badge.className = item.document_count >= 5
-      ? "status status-good"
-      : "status status-warn";
-    badge.textContent = String(item.document_count) + " sample" + (item.document_count === 1 ? "" : "s");
+    const ready = item.document_count >= 5;
+    badge.className = ready ? "status status-good" : "status status-warn";
+    badge.textContent = ready
+      ? String(item.document_count) + " samples · minimum met"
+      : String(item.document_count) + "/5 minimum samples";
     header.append(headingText, badge);
 
     const source = document.createElement("p");
