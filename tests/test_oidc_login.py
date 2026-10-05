@@ -477,3 +477,105 @@ def test_access_token_can_use_independent_audience() -> None:
             token,
             discovery=discovery,
         )
+
+
+def test_public_oidc_mode_allows_pkce_without_client_secret(tmp_path) -> None:
+    fake = FakeOidcClient()
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "data",
+            environment="test",
+            request_logging=False,
+            identity_mode="oidc",
+            public_base_url="http://testserver",
+            oidc_issuer_url="https://identity.example",
+            oidc_client_id="public_client",
+            oidc_client_secret=None,
+            oidc_token_auth_method="none",
+        ),
+        oidc_client=fake,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/auth/login", follow_redirects=False)
+
+    assert response.status_code == 302
+
+
+def test_public_oidc_token_exchange_uses_pkce_without_secret(monkeypatch) -> None:
+    client = GenericOidcClient(
+        issuer_url="https://identity.example",
+        client_id="public_client",
+        client_secret=None,
+        token_auth_method="none",
+    )
+    discovery = {
+        "issuer": "https://identity.example",
+        "authorization_endpoint": "https://identity.example/authorize",
+        "token_endpoint": "https://identity.example/token",
+        "jwks_uri": "https://identity.example/jwks",
+    }
+    monkeypatch.setattr(client, "_get_discovery", lambda: discovery)
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, str]:
+            return {
+                "id_token": "fake-id-token",
+                "access_token": "fake-access-token",
+            }
+
+    def fake_post(
+        url: str,
+        *,
+        data: dict[str, str],
+        auth: tuple[str, str] | None,
+        timeout: float,
+    ) -> FakeResponse:
+        captured["url"] = url
+        captured["data"] = dict(data)
+        captured["auth"] = auth
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("xray_text_forensics.web.oidc.httpx.post", fake_post)
+
+    now = int(time.time())
+    monkeypatch.setattr(
+        client,
+        "_verify_id_token",
+        lambda *args, **kwargs: {
+            "sub": "user_public",
+            "exp": now + 600,
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_verify_access_token",
+        lambda *args, **kwargs: {
+            "sub": "user_public",
+            "exp": now + 300,
+        },
+    )
+
+    principal, _ = client.complete(
+        code="authorization-code",
+        redirect_uri="https://xray.example/auth/callback",
+        code_verifier="pkce-verifier",
+        expected_nonce="nonce",
+        tenant_claim="org_id",
+        role_claim="role",
+        allow_personal_tenant=True,
+    )
+
+    token_data = captured["data"]
+    assert isinstance(token_data, dict)
+    assert token_data["client_id"] == "public_client"
+    assert token_data["code_verifier"] == "pkce-verifier"
+    assert "client_secret" not in token_data
+    assert captured["auth"] is None
+    assert principal.tenant_id == "personal:user_public"
