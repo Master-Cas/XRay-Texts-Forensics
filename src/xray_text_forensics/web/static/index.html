@@ -35,6 +35,9 @@
       <button class="nav-item" data-panel="compare-panel" type="button">
         <span class="nav-icon">⇄</span>Compare
       </button>
+      <button class="nav-item" data-panel="references-panel" type="button">
+        <span class="nav-icon">◎</span>References
+      </button>
       <div class="sidebar-note">
         <strong>Evidence, not verdicts.</strong>
         <p>Watermark, Unicode, style and provenance signals remain separate.</p>
@@ -184,6 +187,58 @@
               <tbody id="case-evidence-body"></tbody>
             </table>
           </div>
+        </section>
+      </section>
+
+      <section id="references-panel" class="panel" aria-labelledby="references-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Known-origin library</p>
+            <h1 id="references-title">Build your reference corpora</h1>
+            <p>
+              Add texts whose origin you already know. XRay keeps these samples inside your
+              account and uses them for comparative style, character-pattern and content signals.
+            </p>
+          </div>
+        </div>
+
+        <form id="reference-create-form" class="surface">
+          <h2>New reference set</h2>
+          <div class="reference-form-grid">
+            <div>
+              <label for="reference-label">Label</label>
+              <input id="reference-label" type="text" maxlength="100" placeholder="Claude stories" required>
+            </div>
+            <div>
+              <label for="reference-provider">Provider</label>
+              <input id="reference-provider" type="text" maxlength="100" placeholder="Anthropic">
+            </div>
+            <div>
+              <label for="reference-model">Model</label>
+              <input id="reference-model" type="text" maxlength="160" placeholder="Claude model/version if known">
+            </div>
+            <div>
+              <label for="reference-language">Language</label>
+              <input id="reference-language" type="text" maxlength="40" placeholder="es">
+            </div>
+            <div>
+              <label for="reference-source">Source</label>
+              <input id="reference-source" type="text" maxlength="300" value="user-known-origin" required>
+            </div>
+          </div>
+          <button class="primary-button" type="submit">Create reference set</button>
+          <p class="scientific-note">
+            One sample is not enough for a reliable corpus. Use multiple independent texts,
+            preferably on varied topics, and record the real provider/model whenever known.
+          </p>
+        </form>
+
+        <section class="surface">
+          <div class="result-toolbar">
+            <h2>Your reference sets</h2>
+            <span id="reference-set-count" class="pill">0 sets</span>
+          </div>
+          <div id="reference-list" class="reference-library-list"></div>
         </section>
       </section>
 

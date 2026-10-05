@@ -56,6 +56,12 @@ from .oidc import (
     OidcSessionIdentityProvider,
     OidcSessionStore,
 )
+from .reference_library import (
+    ReferenceDocumentResponse,
+    ReferenceSetCreate,
+    ReferenceSetSummary,
+    TenantReferenceLibrary,
+)
 from .settings import WebSettings
 from .tenant_storage import TenantStorage, TenantStorageResolver
 
@@ -127,6 +133,8 @@ def create_app(
     reference_comparator, reference_warning_count = load_reference_comparator(settings)
     app.state.reference_comparator = reference_comparator
     app.state.reference_warning_count = reference_warning_count
+    reference_library = TenantReferenceLibrary(max_input_bytes=settings.max_upload_bytes)
+    app.state.reference_library = reference_library
 
     job_manager = JobManager(
         max_workers=settings.max_job_workers,
@@ -326,11 +334,57 @@ def create_app(
             acquisition_method="web-upload",
             source_declared="web-upload",
         )
+        tenant_comparator, tenant_warning_count = reference_library.comparator_for(storage)
+        comparator = tenant_comparator or reference_comparator
+        warning_count = (
+            tenant_warning_count
+            if tenant_comparator is not None or tenant_warning_count
+            else reference_warning_count
+        )
         return run_full_scan(
             result,
-            comparator=reference_comparator,
-            reference_warning_count=reference_warning_count,
+            comparator=comparator,
+            reference_warning_count=warning_count,
         )
+
+    @app.get("/api/v1/references", response_model=list[ReferenceSetSummary])
+    def list_reference_sets(request: Request) -> list[ReferenceSetSummary]:
+        storage = _tenant_storage(request, storage_resolver)
+        return reference_library.list_sets(storage)
+
+    @app.post("/api/v1/references", response_model=ReferenceSetSummary)
+    def create_reference_set(
+        request: Request,
+        payload: ReferenceSetCreate,
+    ) -> ReferenceSetSummary:
+        storage = _tenant_storage(request, storage_resolver)
+        try:
+            return reference_library.create_set(storage, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/v1/references/{set_slug}/documents",
+        response_model=ReferenceDocumentResponse,
+    )
+    async def add_reference_document(
+        request: Request,
+        set_slug: str,
+        file: Annotated[UploadFile, File()],
+    ) -> ReferenceDocumentResponse:
+        storage = _tenant_storage(request, storage_resolver)
+        data, filename = await _read_upload(file, settings.max_upload_bytes)
+        try:
+            return reference_library.add_document(
+                storage,
+                set_slug,
+                filename=filename,
+                data=data,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Reference set not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/v1/compare-transform", response_model=PreservationMetrics)
     async def compare_transform(

@@ -40,13 +40,15 @@ async function loadSession() {
   const response = await fetch(api + "/session");
   if (response.status === 401) {
     setSessionState(null);
-    return;
+    return null;
   }
   if (!response.ok) {
     setSessionState(null);
-    return;
+    return null;
   }
-  setSessionState(await response.json());
+  const principal = await response.json();
+  setSessionState(principal);
+  return principal;
 }
 
 function toast(message) {
@@ -178,6 +180,109 @@ function renderReferenceComparison(report) {
     container.append(card);
   }
   section.hidden = false;
+}
+
+
+function referenceSubtitle(item) {
+  const parts = [];
+  if (item.provider) {
+    parts.push(item.provider);
+  }
+  if (item.model) {
+    parts.push(item.model);
+  }
+  if (item.language) {
+    parts.push(item.language);
+  }
+  return parts.length ? parts.join(" · ") : "Known-origin reference set";
+}
+
+function renderReferenceSets(sets) {
+  const container = $("reference-list");
+  const count = $("reference-set-count");
+  container.replaceChildren();
+  count.textContent = String(sets.length) + " set" + (sets.length === 1 ? "" : "s");
+
+  if (sets.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "reference-empty";
+    empty.textContent = "No reference sets yet. Create human and model-specific sets before interpreting origin.";
+    container.append(empty);
+    return;
+  }
+
+  for (const item of sets) {
+    const card = document.createElement("article");
+    card.className = "reference-library-card";
+
+    const header = document.createElement("div");
+    header.className = "reference-library-heading";
+    const headingText = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.label;
+    const subtitle = document.createElement("span");
+    subtitle.textContent = referenceSubtitle(item);
+    headingText.append(title, subtitle);
+
+    const badge = document.createElement("span");
+    badge.className = item.document_count >= 5
+      ? "status status-good"
+      : "status status-warn";
+    badge.textContent = String(item.document_count) + " sample" + (item.document_count === 1 ? "" : "s");
+    header.append(headingText, badge);
+
+    const source = document.createElement("p");
+    source.textContent = "Source: " + item.source;
+
+    const form = document.createElement("form");
+    form.className = "reference-upload-form";
+    form.dataset.referenceSlug = item.slug;
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = ".txt,.md,.json,.csv,.html,.docx,.pdf";
+    input.required = true;
+
+    const button = document.createElement("button");
+    button.type = "submit";
+    button.className = "secondary-button";
+    button.textContent = "Add known-origin samples";
+
+    form.append(input, button);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const files = [...input.files];
+      if (files.length === 0) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        for (const file of files) {
+          const data = new FormData();
+          data.append("file", file);
+          await jsonRequest(
+            api + "/references/" + encodeURIComponent(item.slug) + "/documents",
+            { method: "POST", body: data },
+          );
+        }
+        toast(String(files.length) + " reference sample(s) added.");
+        await loadReferenceSets();
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    card.append(header, source, form);
+    container.append(card);
+  }
+}
+
+async function loadReferenceSets() {
+  const sets = await jsonRequest(api + "/references");
+  renderReferenceSets(sets || []);
 }
 
 const evidenceLanguage = {
@@ -483,6 +588,31 @@ $("scan-form").addEventListener("submit", async (event) => {
   }
 });
 
+
+$("reference-create-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = {
+    label: $("reference-label").value.trim(),
+    provider: $("reference-provider").value.trim() || null,
+    model: $("reference-model").value.trim() || null,
+    language: $("reference-language").value.trim() || null,
+    source: $("reference-source").value.trim(),
+  };
+  try {
+    await jsonRequest(api + "/references", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    event.target.reset();
+    $("reference-source").value = "user-known-origin";
+    await loadReferenceSets();
+    toast("Reference set created.");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
 $("case-create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -571,4 +701,11 @@ jsonRequest(api + "/health")
   .then(() => setHealth(true))
   .catch(() => setHealth(false));
 
-loadSession().catch(() => setSessionState(null));
+loadSession()
+  .then((principal) => {
+    if (principal) {
+      return loadReferenceSets();
+    }
+    return null;
+  })
+  .catch(() => setSessionState(null));

@@ -101,6 +101,35 @@ XRAY_REFERENCE_ROOT=/path/to/versioned/references
 Reference metadata should identify source, provider/model when known, language, model
 version when known, topic/sampling constraints and licensing/provenance.
 
+## Tenant reference library
+
+The Web product also provides an authenticated tenant-scoped library for known-origin
+reference samples:
+
+```text
+GET  /api/v1/references
+POST /api/v1/references
+POST /api/v1/references/{set_slug}/documents
+```
+
+Reference sets and their raw samples are stored under the tenant's opaque storage root.
+They are never shared with another tenant.
+
+A tenant reference library takes precedence over the optional deployment-wide
+`XRAY_REFERENCE_ROOT` when running a Full Scan.
+
+The UI exposes this as **References**, where a user can create sets such as:
+
+- Human writing;
+- Claude stories;
+- ChatGPT answers;
+- Gemini essays;
+- Dola stories;
+
+and upload multiple known-origin samples to each set.
+
+Reference uploads are content-deduplicated by SHA-256.
+
 ## Product interpretation
 
 The Web UI presents:

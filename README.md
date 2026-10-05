@@ -129,6 +129,8 @@ Operational endpoints:
 - `GET /api/v1/ready` — database/object-store readiness
 - `GET /api/v1/session` — authenticated principal
 - `POST /api/v1/analyze/full` — multi-family forensic scan with explicit NOT_TESTABLE states
+- `GET/POST /api/v1/references` — tenant-scoped known-origin reference library
+- `POST /api/v1/references/{set_slug}/documents` — add content-deduplicated reference samples
 
 The default bind is `127.0.0.1:8080`.
 

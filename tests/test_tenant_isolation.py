@@ -223,3 +223,44 @@ def test_gateway_identity_configuration_reads_from_environment(monkeypatch, tmp_
 
     assert settings.identity_mode == "gateway"
     assert settings.gateway_shared_secret == _GATEWAY_SECRET
+
+
+def test_reference_library_is_isolated_across_tenants(tmp_path) -> None:
+    with gateway_client(tmp_path) as client:
+        created = client.post(
+            "/api/v1/references",
+            json={
+                "label": "Claude known origin",
+                "provider": "Anthropic",
+                "source": "tenant-a-controlled",
+            },
+            headers=gateway_headers("tenant-a", subject="alice"),
+        )
+        assert created.status_code == 200, created.text
+        slug = created.json()["slug"]
+
+        uploaded = client.post(
+            f"/api/v1/references/{slug}/documents",
+            files={
+                "file": (
+                    "claude.txt",
+                    b"A known-origin reference sample for tenant A.",
+                    "text/plain",
+                )
+            },
+            headers=gateway_headers("tenant-a", subject="alice"),
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        same_tenant = client.get(
+            "/api/v1/references",
+            headers=gateway_headers("tenant-a", subject="bob"),
+        )
+        other_tenant = client.get(
+            "/api/v1/references",
+            headers=gateway_headers("tenant-b", subject="mallory"),
+        )
+
+    assert len(same_tenant.json()) == 1
+    assert same_tenant.json()[0]["document_count"] == 1
+    assert other_tenant.json() == []

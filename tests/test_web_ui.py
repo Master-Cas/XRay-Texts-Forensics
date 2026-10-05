@@ -70,3 +70,7 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     assert "Hidden zero-width characters" in script.text
     assert "Words mixing look-alike alphabets" in script.text
     assert "Unicode representation changes after normalization" in script.text
+    assert "Build your reference corpora" in page.text
+    assert "Known-origin library" in page.text
+    assert '"/references"' in script.text
+    assert "Add known-origin samples" in script.text
