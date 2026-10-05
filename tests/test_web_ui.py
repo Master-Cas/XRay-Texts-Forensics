@@ -52,3 +52,21 @@ def test_api_still_has_security_headers(tmp_path) -> None:
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
+    web = client(tmp_path)
+    page = web.get("/")
+    script = web.get("/static/app.js")
+
+    assert "Plain-language result" in page.text
+    assert "What this scan means" in page.text
+    assert "Show technical evidence" in page.text
+    assert "By themselves, they do not prove" in page.text
+
+    assert "Hidden zero-width characters" in script.text
+    assert "Text-direction controls" in script.text
+    assert "Words mixing look-alike alphabets" in script.text
+    assert "Unicode representation changes after normalization" in script.text
+    assert "Review recommended" in script.text
+    assert "No unusual Unicode patterns found" in script.text
