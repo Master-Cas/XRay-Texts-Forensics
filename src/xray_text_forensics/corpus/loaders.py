@@ -10,7 +10,7 @@ from xray_text_forensics.runtime import analysis_context_from_ingest
 
 from .models import CorpusDocument
 
-_SUPPORTED = {".txt", ".md", ".markdown", ".json", ".csv", ".html", ".htm", ".docx", ".pdf"}
+_SUPPORTED = {".txt", ".md", ".markdown", ".json", ".csv", ".html", ".htm", ".docx", ".odt", ".pdf"}
 
 
 def load_directory(
