@@ -41,6 +41,45 @@ def test_deploy_script_has_release_safety_invariants() -> None:
     assert "rollback()" in text
 
 
+def test_deploy_backups_are_private_by_default() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "umask 077" in text
+    assert 'install -d -m 0700 "$backups_root"' in text
+    assert 'install -d -m 0700 "$backup_dir"' in text
+    assert 'install -m 0600 "$compose_file" "$backup_dir/compose.yaml"' in text
+    assert 'chmod 0600 "$backup_dir/current.target" "$backup_dir/previous-image.txt"' in text
+    assert 'install -m 0600 "$runtime_override" "$backup_dir/compose.release.yaml"' in text
+    assert 'chmod 0600 "$backup_dir/xtf-data.tgz"' in text
+    assert "sudo -n chown" not in text
+
+
+def test_rollback_image_contract_is_verified_before_and_after_cutover() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    resolve = text.index('resolved_old_image="$(compose_service_image')
+    stop = text.index('sudo -n docker stop "$container"')
+    assert resolve < stop
+    assert '[[ "$resolved_old_image" == "$old_image" ]]' in text
+    assert 'fail "pre-cutover compose image does not match running image"' in text
+
+    rollback = text.index("rollback() {")
+    restore_up = text.index(
+        'docker compose "${restore_compose_args[@]}" up -d --no-deps "$service"',
+        rollback,
+    )
+    restored_inspect = text.index(
+        'restored_image="$(sudo -n docker inspect "$container" --format',
+        restore_up,
+    )
+    restored_compare = text.index(
+        'if [[ "$restored_image" != "$old_image" ]]; then',
+        restored_inspect,
+    )
+    assert restore_up < restored_inspect < restored_compare
+    assert "ROLLBACK FAILED: restored container image" in text
+
+
 def test_deploy_script_preserves_data_secrets_and_caddy() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
 
@@ -85,5 +124,8 @@ def test_release_contract_documents_real_production_topology() -> None:
         "read-only",
         "Automatic rollback",
         "Secrets policy",
+        "mode `0700`",
+        "mode `0600`",
+        "ROLLBACK FAILED",
     ):
         assert required in text
