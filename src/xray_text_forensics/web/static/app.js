@@ -95,6 +95,91 @@ function fillMetrics(container, metrics) {
   }
 }
 
+
+function familyStateClass(state) {
+  if (state === "COMPLETE") {
+    return "family-state family-complete";
+  }
+  if (state === "NOT_TESTABLE" || state === "INSUFFICIENT_DATA") {
+    return "family-state family-unavailable";
+  }
+  return "family-state family-error";
+}
+
+function renderFamilySummaries(rows) {
+  const container = $("family-cards");
+  container.replaceChildren();
+  for (const item of rows) {
+    const card = document.createElement("article");
+    card.className = "family-card";
+
+    const heading = document.createElement("div");
+    heading.className = "family-card-heading";
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    const state = document.createElement("span");
+    state.className = familyStateClass(item.state);
+    state.textContent = item.state === "COMPLETE"
+      ? "Completed"
+      : item.state === "NOT_TESTABLE"
+        ? "Unavailable"
+        : item.state === "INSUFFICIENT_DATA"
+          ? "Limited sample"
+          : "Error";
+    heading.append(title, state);
+
+    const summary = document.createElement("p");
+    summary.textContent = item.summary;
+    card.append(heading, summary);
+    container.append(card);
+  }
+}
+
+function renderOriginAssessment(origin) {
+  const badge = $("origin-badge");
+  $("origin-title").textContent = origin.headline;
+  $("origin-text").textContent = origin.explanation;
+  if (origin.state === "REFERENCE_COMPARISON") {
+    badge.textContent = "Reference comparison available";
+    badge.className = "status status-good";
+  } else {
+    badge.textContent = "Origin not testable yet";
+    badge.className = "status status-warn";
+  }
+}
+
+function renderReferenceComparison(report) {
+  const section = $("reference-results");
+  const container = $("reference-cards");
+  container.replaceChildren();
+
+  if (!report || !report.comparisons || report.comparisons.length === 0) {
+    section.hidden = true;
+    return;
+  }
+
+  const sorted = [...report.comparisons].sort(
+    (a, b) => b.style_similarity - a.style_similarity,
+  );
+  for (const item of sorted) {
+    const card = document.createElement("article");
+    card.className = "reference-card";
+    const title = document.createElement("strong");
+    title.textContent = item.label;
+
+    const style = document.createElement("span");
+    style.textContent = "Style " + item.style_similarity.toFixed(3);
+    const chars = document.createElement("span");
+    chars.textContent = "Character patterns " + item.char_svd_similarity.toFixed(3);
+    const content = document.createElement("span");
+    content.textContent = "Content " + item.content_similarity.toFixed(3);
+
+    card.append(title, style, chars, content);
+    container.append(card);
+  }
+  section.hidden = false;
+}
+
 const evidenceLanguage = {
   ZERO_WIDTH_CHARACTER: {
     title: "Hidden zero-width characters",
@@ -301,10 +386,10 @@ async function scanFile(file) {
   const data = new FormData();
   data.append("file", file);
   $("scan-progress").hidden = false;
-  $("scan-progress").textContent = "Preserving bytes and running Unicode forensics…";
+  $("scan-progress").textContent = "Preserving bytes and running the full forensic scan…";
 
   try {
-    const result = await jsonRequest(api + "/analyze/unicode", {
+    const result = await jsonRequest(api + "/analyze/full", {
       method: "POST",
       body: data,
     });
@@ -316,8 +401,15 @@ async function scanFile(file) {
       { label: "Encoding", value: result.artifact.detected_encoding || "n/a" },
       { label: "Views", value: result.views.length },
     ]);
-    renderPlainLanguageEvidence(result.evidence);
-    renderEvidence(result.evidence, $("evidence-body"), $("evidence-count"));
+    renderOriginAssessment(result.origin_assessment);
+    renderFamilySummaries(result.family_summaries || []);
+    renderReferenceComparison(result.reference_comparison);
+    renderPlainLanguageEvidence(result.unicode_evidence || []);
+    renderEvidence(
+      result.unicode_evidence || [],
+      $("evidence-body"),
+      $("evidence-count"),
+    );
     $("scan-summary").hidden = false;
   } finally {
     $("scan-progress").hidden = true;

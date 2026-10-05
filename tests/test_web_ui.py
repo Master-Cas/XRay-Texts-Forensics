@@ -59,14 +59,14 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     page = web.get("/")
     script = web.get("/static/app.js")
 
-    assert "Plain-language result" in page.text
-    assert "What this scan means" in page.text
-    assert "Show technical evidence" in page.text
-    assert "By themselves, they do not prove" in page.text
+    assert "Overall forensic result" in page.text
+    assert "Run full forensic scan" in page.text
+    assert "Show technical Unicode evidence" in page.text
+    assert "Missing tests are reported as unavailable" in page.text
 
+    assert '"/analyze/full"' in script.text
+    assert "Reference comparison available" in script.text
+    assert "Origin not testable yet" in script.text
     assert "Hidden zero-width characters" in script.text
-    assert "Text-direction controls" in script.text
     assert "Words mixing look-alike alphabets" in script.text
     assert "Unicode representation changes after normalization" in script.text
-    assert "Review recommended" in script.text
-    assert "No unusual Unicode patterns found" in script.text

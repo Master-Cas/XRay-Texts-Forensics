@@ -2,7 +2,7 @@
 
 Evidence-driven text forensics platform for watermark detection, linguistic fingerprints, provenance analysis, and AI-generated text auditing.
 
-> Status: **M16 — Managed OIDC Accounts & Login**
+> Status: **M17 — Full Forensic Scan & Human Interpretation**
 
 ## What XRay is
 
@@ -102,6 +102,7 @@ All product surfaces use the same scientific Core. Detector semantics are never 
 - M14 — Windows Installer Alpha
 - M15 — SaaS Tenant Isolation & Identity Boundary
 - M16 — Managed OIDC Accounts & Login
+- M17 — Full Forensic Scan & Human Interpretation
 
 ## Development
 
@@ -127,6 +128,7 @@ Operational endpoints:
 - `GET /api/v1/health` — process liveness
 - `GET /api/v1/ready` — database/object-store readiness
 - `GET /api/v1/session` — authenticated principal
+- `POST /api/v1/analyze/full` — multi-family forensic scan with explicit NOT_TESTABLE states
 
 The default bind is `127.0.0.1:8080`.
 

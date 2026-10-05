@@ -27,6 +27,7 @@ from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 
 from .desktop_access import DesktopAccessMiddleware
+from .full_scan import FullScanResponse, load_reference_comparator, run_full_scan
 from .identity import (
     GatewayIdentityProvider,
     IdentityBoundaryMiddleware,
@@ -123,6 +124,9 @@ def create_app(
     app.state.oidc_client = oidc_client
     storage_resolver = TenantStorageResolver(settings.data_root)
     app.state.tenant_storage_resolver = storage_resolver
+    reference_comparator, reference_warning_count = load_reference_comparator(settings)
+    app.state.reference_comparator = reference_comparator
+    app.state.reference_warning_count = reference_warning_count
 
     job_manager = JobManager(
         max_workers=settings.max_job_workers,
@@ -307,6 +311,25 @@ def create_app(
         return UnicodeAnalysisResponse(
             **base.model_dump(),
             evidence=evidence,
+        )
+
+    @app.post("/api/v1/analyze/full", response_model=FullScanResponse)
+    async def analyze_full(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+    ) -> FullScanResponse:
+        storage = _tenant_storage(request, storage_resolver)
+        data, filename = await _read_upload(file, settings.max_upload_bytes)
+        result = _ingestor(settings, storage).ingest_bytes(
+            data,
+            filename=filename,
+            acquisition_method="web-upload",
+            source_declared="web-upload",
+        )
+        return run_full_scan(
+            result,
+            comparator=reference_comparator,
+            reference_warning_count=reference_warning_count,
         )
 
     @app.post("/api/v1/compare-transform", response_model=PreservationMetrics)
