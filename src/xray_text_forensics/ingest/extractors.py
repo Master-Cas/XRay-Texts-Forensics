@@ -12,6 +12,7 @@ from pypdf import PdfReader
 from .models import IngestPolicy
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+ODT_MEDIA_TYPE = "application/vnd.oasis.opendocument.text"
 
 
 class ExtractionError(RuntimeError):
@@ -45,6 +46,9 @@ def extract_text(
 
     if media_type == DOCX_MEDIA_TYPE:
         return _extract_docx(data, policy), "extract-docx-text"
+
+    if media_type == ODT_MEDIA_TYPE:
+        return _extract_odt(data, policy), "extract-odt-text"
 
     if media_type == "application/pdf":
         return _extract_pdf(data, policy), "extract-pdf-text"
@@ -184,3 +188,62 @@ def _extract_pdf(data: bytes, policy: IngestPolicy) -> str:
         raise
     except Exception as exc:
         raise ExtractionError(f"PDF text extraction failed: {type(exc).__name__}") from exc
+
+
+def _extract_odt(data: bytes, policy: IngestPolicy) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            infos = archive.infolist()
+            if len(infos) > policy.max_archive_entries:
+                raise ExtractionLimitError(
+                    f"ODT has more than {policy.max_archive_entries} archive entries"
+                )
+
+            total_uncompressed = sum(info.file_size for info in infos)
+            if total_uncompressed > policy.max_archive_uncompressed_bytes:
+                raise ExtractionLimitError(
+                    "ODT uncompressed archive size exceeds configured limit"
+                )
+
+            try:
+                content_xml = archive.read("content.xml")
+            except KeyError as exc:
+                raise ExtractionError("ODT is missing content.xml") from exc
+    except zipfile.BadZipFile as exc:
+        raise ExtractionError("Invalid ODT/ZIP container") from exc
+
+    try:
+        root = ElementTree.fromstring(content_xml)
+    except ElementTree.ParseError as exc:
+        raise ExtractionError("Invalid ODT content XML") from exc
+
+    text_ns = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
+    office_ns = "{urn:oasis:names:tc:opendocument:xmlns:office:1.0}"
+    body = root.find(f".//{office_ns}body")
+    if body is None:
+        return ""
+
+    paragraphs: list[str] = []
+    for paragraph in body.iter():
+        if paragraph.tag not in {f"{text_ns}p", f"{text_ns}h"}:
+            continue
+        parts: list[str] = []
+        for node in paragraph.iter():
+            if node is paragraph:
+                if node.text:
+                    parts.append(node.text)
+                continue
+            if node.tag == f"{text_ns}tab":
+                parts.append("\t")
+            elif node.tag == f"{text_ns}line-break":
+                parts.append("\n")
+            elif node.tag == f"{text_ns}s":
+                repeat = int(node.attrib.get(f"{text_ns}c", "1"))
+                parts.append(" " * max(1, repeat))
+            elif node.text:
+                parts.append(node.text)
+            if node.tail:
+                parts.append(node.tail)
+        paragraphs.append("".join(parts))
+
+    return _limit_text("\n".join(paragraphs), policy)
