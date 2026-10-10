@@ -344,10 +344,17 @@ def create_app(
     @app.get("/api/v1/ready", response_model=None)
     def ready() -> JSONResponse:
         composite_status = app.state.composite_status
-        composite_health = getattr(app.state.composite_classifier, "health", None)
-        if composite_status == "ok" and callable(composite_health):
+        if composite_status == "ok":
+            classifier = app.state.composite_classifier
+            worker_status = getattr(classifier, "operational_status", None)
+            composite_health = getattr(classifier, "health", None)
             try:
-                if not composite_health():
+                if callable(worker_status):
+                    observed_status = worker_status()
+                    composite_status = (
+                        observed_status if observed_status in {"ok", "busy"} else "error"
+                    )
+                elif callable(composite_health) and not composite_health():
                     composite_status = "error"
             except Exception:
                 composite_status = "error"
@@ -828,7 +835,9 @@ def _readiness(
             and checks.get("auth_journal_mode") == "wal"
         )
     )
-    composite_ok = settings.composite_root is None or composite_status == "ok"
+    composite_ok = (
+        settings.composite_root is None or composite_status in {"ok", "busy"}
+    )
     required_ok = (
         checks.get("database") == "ok"
         and checks.get("journal_mode") == "wal"

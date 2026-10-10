@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +17,12 @@ mode = sys.argv[1]
 def put(payload):
     sys.stdout.buffer.write(payload)
     sys.stdout.buffer.flush()
-HELLO = {"status": "ready", "closure_sha256": "85fbf6abb0f800fa4fbcb88fe5930987d50794e2776128d8b6731db9c486d3fa"}
+HELLO = {
+    "status": "ready",
+    "closure_sha256": (
+        "85fbf6abb0f800fa4fbcb88fe5930987d50794e2776128d8b6731db9c486d3fa"
+    ),
+}
 if mode == "silent_hello":
     time.sleep(30)
 elif mode == "partial_hello":
@@ -35,6 +42,8 @@ else:
     put((json.dumps(HELLO) + "\n").encode())
     for line in sys.stdin:
         request = json.loads(line)
+        if mode == "slow_reply" and request["command"] == "classify":
+            time.sleep(1.2)
         if mode == "silent_reply":
             time.sleep(30)
         if mode == "partial_reply":
@@ -51,7 +60,11 @@ else:
         if mode == "wrong_id":
             put(b'{"id":"wrong","ok":true,"result":{"pong":true}}\n')
             continue
-        put((json.dumps({"id": request["id"], "ok": True, "result": {"pong": True, "state": "INCONCLUSIVE"}}) + "\n").encode())
+        payload = {
+            "id": request["id"], "ok": True,
+            "result": {"pong": True, "state": "INCONCLUSIVE"},
+        }
+        put((json.dumps(payload) + "\n").encode())
 '''
 
 
@@ -68,7 +81,9 @@ def make_worker(tmp_path: Path, mode: str, *, timeout: int = 1) -> FrozenComposi
 @pytest.mark.parametrize(
     "mode", ("silent_hello", "partial_hello", "bad_hello", "no_hello", "wrong_hello")
 )
-def test_initialization_failures_do_not_orphan_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+def test_initialization_failures_do_not_orphan_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
     processes = []
     import xray_text_forensics.web.composite as client_module
 
@@ -130,7 +145,9 @@ def test_lock_timeout_does_not_kill_healthy_worker(tmp_path: Path) -> None:
     client.close()
 
 
-def test_oversized_request_fails_before_ipc_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_oversized_request_fails_before_ipc_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import xray_text_forensics.web.composite as client_module
 
     client = make_worker(tmp_path, "normal")
@@ -138,3 +155,57 @@ def test_oversized_request_fails_before_ipc_write(tmp_path: Path, monkeypatch: p
     with pytest.raises(ValueError):
         client.classify("abcdefgh")
     assert client._process.poll() is not None
+
+
+def test_worker_busy_is_not_worker_broken(tmp_path: Path) -> None:
+    client = make_worker(tmp_path, "slow_reply", timeout=4)
+    entered = threading.Event()
+    replies: list[dict] = []
+
+    def classify() -> None:
+        entered.set()
+        replies.append(client.classify("entirely synthetic sample"))
+
+    task = threading.Thread(target=classify, daemon=True)
+    task.start()
+    assert entered.wait(1)
+    deadline = time.monotonic() + 2
+    while not client._lock.locked() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert client._lock.locked()
+    assert client.operational_status() == "busy"
+    assert client._process.poll() is None
+    task.join(timeout=3)
+    assert not task.is_alive()
+    assert len(replies) == 1
+    assert client.operational_status() == "ok"
+    client.close()
+    assert client._process.poll() is not None
+
+
+def test_dead_worker_not_reported_as_busy(tmp_path: Path) -> None:
+    client = make_worker(tmp_path, "normal")
+    client._process.kill()
+    client._process.wait(timeout=3)
+    assert client.operational_status() == "error"
+    client.close()
+    assert client._process.poll() is not None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-specific subprocess pipe test")
+def test_windows_synthetic_worker_pipe_cleanup(tmp_path: Path) -> None:
+    for mode in ("normal", "stderr_flood", "partial_reply", "die_during_ipc"):
+        client = make_worker(tmp_path, mode, timeout=2)
+        try:
+            if mode in {"normal", "stderr_flood"}:
+                assert client.health()
+            else:
+                with pytest.raises((RuntimeError, TimeoutError)):
+                    client.classify("synthetic")
+        finally:
+            client.close()
+        assert client._process.poll() is not None
+        assert all(
+            stream is None or stream.closed
+            for stream in (client._process.stdin, client._process.stdout, client._process.stderr)
+        )

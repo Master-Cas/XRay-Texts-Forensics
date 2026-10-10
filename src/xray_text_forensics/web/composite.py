@@ -21,9 +21,6 @@ MAX_IPC_RESPONSE_BYTES = 64 * 1024
 MAX_IPC_REQUEST_BYTES = 32 * 1024 * 1024
 _READ_CHUNK = 4096
 _CLEANUP_RESERVE_SECONDS = 0.5
-
-def _remaining(deadline: float) -> float:
-    return max(0.0, deadline - time.monotonic())
 EXPECTED_CLOSURE_SHA256 = "85fbf6abb0f800fa4fbcb88fe5930987d50794e2776128d8b6731db9c486d3fa"
 EXPECTED_FREEZE_SHA256 = "23a67a9adb85ffef3199d6e2f332a77683a7c2ca3eb3a41ad8ae14de1ad2d20f"
 EXPECTED_RUNTIME_MANIFEST_SHA256 = (
@@ -37,6 +34,10 @@ EXPECTED_AI_RUNTIME_SHA256 = "eb89527a4d8a866f0987a866f827857555eab874cf28244e3c
 EXPECTED_AI_RUNTIME_MANIFEST_SHA256 = (
     "dc13db59df8dea4128b880cab0870760f80c1fe3d3598e9329c88e685f4b3d13"
 )
+
+
+def _remaining(deadline: float) -> float:
+    return max(0.0, deadline - time.monotonic())
 
 
 class CompositeClassifier(Protocol):
@@ -279,6 +280,28 @@ class FrozenCompositeWorkerClient:
             return False
         return result.get("pong") is True
 
+    def operational_status(self) -> str:
+        """Return ok/busy/error without pinging over an active inference.
+
+        A live worker holding its request lock is busy, not broken.
+        An idle worker receives the original bounded liveness ping.
+        """
+        if self._closed.is_set() or self._process.poll() is not None:
+            return "error"
+        if self._lock.locked():
+            return "busy"
+        if self.health():
+            return "ok"
+        # An inference may acquire the lock between the first check and
+        # the health ping. Do not reinterpret that race as worker failure.
+        if (
+            self._lock.locked()
+            and not self._closed.is_set()
+            and self._process.poll() is None
+        ):
+            return "busy"
+        return "error"
+
     def close(self, *, deadline: float | None = None) -> None:
         with self._close_lock:
             process = getattr(self, "_process", None)
@@ -352,4 +375,6 @@ def load_frozen_composite(
         client = FrozenCompositeWorkerClient(root, timeout_seconds=timeout_seconds)
         return CompositeLoadResult(client, "ok", None)
     except Exception as exc:
-        return CompositeLoadResult(None, "error", f"Frozen composite unavailable: {type(exc).__name__}")
+        return CompositeLoadResult(
+            None, "error", f"Frozen composite unavailable: {type(exc).__name__}"
+        )

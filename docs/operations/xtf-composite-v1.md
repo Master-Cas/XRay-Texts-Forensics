@@ -86,8 +86,16 @@ reports composite_runtime=not_configured; full scans report authorship NOT_TESTA
 When a root is configured:
 
 - startup verifies hashes and starts the worker;
-- `/api/v1/ready` performs a live `ping` against the worker;
+- `/api/v1/ready` performs a bounded live `ping` only while the worker is idle;
+- /api/v1/health and /healthz are lightweight process liveness endpoints and
+  do not request inference or wait for the frozen worker;
+- /api/v1/ready distinguishes `composite_runtime=ok`, `busy`, and `error`;
+  `busy` means a live worker holds the one-request inference lock, so readiness
+  remains HTTP 200 rather than falsely reporting a broken worker;
 - a failed or dead worker makes readiness return HTTP 503 with `composite_runtime=error`;
+  an idle worker is checked with a bounded ping, while a busy worker is not pinged;
+- an absent configured root is `not_configured` and remains HTTP 200; a configured
+  runtime which failed startup is `error` and HTTP 503;
 - a full scan still preserves the rest of the forensic analysis, but reports
   `authorship_assessment.state=ERROR` rather than converting a runtime failure into negative or
   positive authorship evidence. The same ERROR state applies to configuration-enabled
@@ -132,7 +140,9 @@ fresh-blind performance claim for the composite.
 
 ## Deployment boundary
 
-The JSONL IPC avoids select.select on pipes and can operate on Windows, but the
+The JSONL IPC avoids select.select on pipes and has cross-platform subprocess pipe
+primitives. Synthetic IPC tests must be executed on a real Windows runner before
+Windows worker compatibility may be claimed. The
 frozen research wrapper, absolute Nitro root and model dependency installation have
 NOT been demonstrated portable to a Windows product runtime. A passing Windows
 installer CI job does NOT validate composite runtime compatibility.
@@ -146,3 +156,11 @@ deployment procedure; there is no per-request auto-retry.
 This document does **not** authorize production deployment. Production remains unchanged until a
 separate deployment gate verifies artifact placement, host resources, service supervision,
 rollback, observability and public response behavior on the target host.
+
+## Hardening-03 validation boundary
+
+This gate changes only web integration, synthetic worker tests and documentation.
+It does not alter, load, train or score scientific models or consumed blind samples.
+GitHub CI and a Windows synthetic-worker runner must validate the exact committed SHA.
+The Windows Desktop installer build alone is not sufficient. Production remains blocked
+until an independently authorized deployment gate.

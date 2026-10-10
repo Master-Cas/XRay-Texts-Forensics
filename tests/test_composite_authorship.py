@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
 import threading
+from typing import Any
 
 import pytest
-
 from fastapi.testclient import TestClient
 
 from xray_text_forensics.web import WebSettings, create_app
@@ -22,10 +21,10 @@ class FakeComposite:
         return self.payload
 
 
-
 class UnhealthyComposite(FakeComposite):
     def health(self) -> bool:
         return False
+
 
 def _scan(tmp_path, classifier: FakeComposite, text: str | None = None) -> dict[str, Any]:
     app = create_app(
@@ -223,6 +222,11 @@ def test_healthz_remains_responsive_while_one_worker_is_busy(tmp_path) -> None:
     release = threading.Event()
 
     class SlowComposite(FakeComposite):
+        def operational_status(self) -> str:
+            if entered.is_set() and not release.is_set():
+                return "busy"
+            return "ok"
+
         def classify(self, text: str) -> dict[str, Any]:
             entered.set()
             assert release.wait(5)
@@ -244,6 +248,9 @@ def test_healthz_remains_responsive_while_one_worker_is_busy(tmp_path) -> None:
         thread.start()
         assert entered.wait(5)
         assert web.get("/healthz").status_code == 200
+        ready_during_inference = web.get("/api/v1/ready")
+        assert ready_during_inference.status_code == 200
+        assert ready_during_inference.json()["checks"]["composite_runtime"] == "busy"
         busy = web.post(
             "/api/v1/analyze/full",
             files={"file": ("sample.txt", ("Texto sintético " * 100).encode(), "text/plain")},
@@ -253,4 +260,25 @@ def test_healthz_remains_responsive_while_one_worker_is_busy(tmp_path) -> None:
         release.set()
         thread.join(timeout=5)
         assert not thread.is_alive()
+        ready_after = web.get("/api/v1/ready")
+        assert ready_after.status_code == 200
+        assert ready_after.json()["checks"]["composite_runtime"] == "ok"
     assert results == [200]
+
+
+def test_dead_worker_operational_status_fails_readiness(tmp_path) -> None:
+    class DeadComposite(FakeComposite):
+        def operational_status(self) -> str:
+            return "error"
+
+    app = create_app(
+        WebSettings(
+            data_root=tmp_path / "dead",
+            composite_root=tmp_path / "configured-runtime",
+        ),
+        composite_classifier=DeadComposite(_payload("INCONCLUSIVE")),
+    )
+    with TestClient(app) as web:
+        ready = web.get("/api/v1/ready")
+    assert ready.status_code == 503
+    assert ready.json()["checks"]["composite_runtime"] == "error"
