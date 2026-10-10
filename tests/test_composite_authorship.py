@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
+import threading
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -160,3 +163,94 @@ def test_configured_unhealthy_worker_fails_live_readiness(tmp_path) -> None:
     ready = web.get("/api/v1/ready")
     assert ready.status_code == 503
     assert ready.json()["checks"]["composite_runtime"] == "error"
+
+
+def test_configured_bad_hash_is_error_not_not_testable(tmp_path) -> None:
+    root = tmp_path / "configured-missing-artifacts"
+    root.mkdir()
+    app = create_app(WebSettings(data_root=tmp_path / "data", composite_root=root))
+    with TestClient(app) as web:
+        result = web.post(
+            "/api/v1/analyze/full",
+            files={"file": ("sample.txt", ("Texto sintético " * 100).encode(), "text/plain")},
+        )
+    assert result.status_code == 200
+    assessment = result.json()["authorship_assessment"]
+    assert assessment["state"] == "ERROR"
+    assert "configured frozen runtime" in assessment["explanation"]
+    assert str(root) not in result.text
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("state", "WRONG_STATE"),
+        ("eligible", "true"),
+        ("ai_likely", 1),
+        ("human_likely", None),
+        ("original_tokens", True),
+        ("original_tokens", -2),
+        ("parent_score", float("nan")),
+        ("specialist_score", "2.0"),
+        ("p_human", 1.2),
+        ("p_human", float("inf")),
+        ("versions", []),
+        ("human_density_score", None),
+    ],
+)
+def test_malformed_runtime_payload_fails_closed(tmp_path, field, value) -> None:
+    payload = _payload("HUMAN_LIKELY")
+    payload[field] = value
+    result = _scan(tmp_path, FakeComposite(payload))
+    assert result["authorship_assessment"]["state"] == "ERROR"
+    assert result["family_summaries"][0]["state"] == "ERROR"
+
+
+def test_channel_precedence_contradictions_rejected(tmp_path) -> None:
+    contradicted = _payload("AI_LIKELY")
+    contradicted["ai_likely"] = False
+    assert _scan(tmp_path / "a", FakeComposite(contradicted))[
+        "authorship_assessment"
+    ]["state"] == "ERROR"
+    ineligible = _payload("HUMAN_LIKELY", eligible=False)
+    assert _scan(tmp_path / "b", FakeComposite(ineligible))[
+        "authorship_assessment"
+    ]["state"] == "ERROR"
+
+
+def test_healthz_remains_responsive_while_one_worker_is_busy(tmp_path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowComposite(FakeComposite):
+        def classify(self, text: str) -> dict[str, Any]:
+            entered.set()
+            assert release.wait(5)
+            return _payload("INCONCLUSIVE")
+
+    app = create_app(
+        WebSettings(data_root=tmp_path / "async-data"),
+        composite_classifier=SlowComposite(),
+    )
+    results: list[int] = []
+    with TestClient(app) as web:
+        def analyze() -> None:
+            reply = web.post(
+                "/api/v1/analyze/full",
+                files={"file": ("sample.txt", ("Texto sintético " * 100).encode(), "text/plain")},
+            )
+            results.append(reply.status_code)
+        thread = threading.Thread(target=analyze, daemon=True)
+        thread.start()
+        assert entered.wait(5)
+        assert web.get("/healthz").status_code == 200
+        busy = web.post(
+            "/api/v1/analyze/full",
+            files={"file": ("sample.txt", ("Texto sintético " * 100).encode(), "text/plain")},
+        )
+        assert busy.status_code == 503
+        assert busy.headers["retry-after"] == "1"
+        release.set()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    assert results == [200]

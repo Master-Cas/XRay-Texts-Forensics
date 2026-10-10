@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import time
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 
@@ -188,7 +190,13 @@ def create_app(
         composite_unavailable_reason = None
     app.state.composite_classifier = composite_classifier
     app.state.composite_status = composite_status
-    app.state.composite_unavailable_reason = composite_unavailable_reason
+    app.state.composite_unavailable_reason = (
+        composite_unavailable_reason if composite_status == "error" else None
+    )
+    # One in-flight configured composite scan per web process; no unbounded queue.
+    app.state.composite_scan_slot = (
+        asyncio.Semaphore(1) if composite_classifier is not None else None
+    )
     composite_close = getattr(composite_classifier, "close", None)
     if callable(composite_close):
         app.router.add_event_handler("shutdown", composite_close)
@@ -329,6 +337,7 @@ def create_app(
         return response
 
     @app.get("/api/v1/health", response_model=HealthResponse)
+    @app.get("/healthz", response_model=HealthResponse, include_in_schema=False)
     def health() -> HealthResponse:
         return HealthResponse(build_sha=settings.build_sha)
 
@@ -417,14 +426,29 @@ def create_app(
             else None
         )
 
-        return run_full_scan(
-            result,
-            comparator=comparator,
-            reference_warning_count=warning_count,
-            reference_unavailable_reason=unavailable_reason,
-            authorship_classifier=app.state.composite_classifier,
-            authorship_unavailable_reason=app.state.composite_unavailable_reason,
-        )
+        scan_slot: asyncio.Semaphore | None = app.state.composite_scan_slot
+        if scan_slot is not None:
+            if scan_slot.locked():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Composite scan capacity occupied; retry the request.",
+                    headers={"Retry-After": "1"},
+                )
+            await scan_slot.acquire()
+        try:
+            # All synchronous forensic work and frozen worker IPC run off-loop.
+            return await run_in_threadpool(
+                run_full_scan,
+                result,
+                comparator=comparator,
+                reference_warning_count=warning_count,
+                reference_unavailable_reason=unavailable_reason,
+                authorship_classifier=app.state.composite_classifier,
+                authorship_unavailable_reason=app.state.composite_unavailable_reason,
+            )
+        finally:
+            if scan_slot is not None:
+                scan_slot.release()
 
     @app.get("/api/v1/references/status", response_model=ReferenceLibraryStatus)
     def reference_library_status(request: Request) -> ReferenceLibraryStatus:

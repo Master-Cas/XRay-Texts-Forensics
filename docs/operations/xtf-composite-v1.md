@@ -45,9 +45,18 @@ pipes. The worker loads XLM-R once and stays resident for subsequent scans.
 This avoids changing the web dependency graph to satisfy the frozen Torch/Transformers stack and
 avoids changing the frozen ML environment to satisfy web dependencies.
 
-Requests are serialized through a process-local lock so a single worker cannot interleave JSON
-responses. Separate web processes require separate workers unless a future, separately reviewed
-service architecture is introduced.
+The IPC client uses bounded binary pipes with background stdout/stderr readers and a
+bounded write queue. Its full-message timeout includes lock acquisition and IPC transfer,
+and reserves bounded time for process termination. A reply without a newline is not
+accepted. Individual responses are limited to 64 KiB; requests to 32 MiB. A broken
+exchange poisons the worker, which is terminated without automatic restart.
+
+A process-local web semaphore permits one full composite scan at a time. Excess
+requests receive HTTP 503 with Retry-After rather than waiting in an unbounded queue.
+Full scans run in a thread pool so /healthz and /api/v1/health remain responsive.
+Each web process has its own worker; horizontal scaling multiplies ML memory demand.
+Worker stderr is continuously drained, hashed and byte-counted for operational
+diagnosis without storing raw text or user input.
 
 ## Configuration
 
@@ -71,8 +80,8 @@ artifact-placement/deployment gate; do not silently rewrite paths inside the fro
 
 ## Readiness and failure behavior
 
-When no composite root is configured, the classifier is optional and `/api/v1/ready` reports
-`composite_runtime=not_configured` without failing overall readiness.
+When no composite root is configured, the classifier is optional and /api/v1/ready
+reports composite_runtime=not_configured; full scans report authorship NOT_TESTABLE.
 
 When a root is configured:
 
@@ -81,7 +90,10 @@ When a root is configured:
 - a failed or dead worker makes readiness return HTTP 503 with `composite_runtime=error`;
 - a full scan still preserves the rest of the forensic analysis, but reports
   `authorship_assessment.state=ERROR` rather than converting a runtime failure into negative or
-  positive authorship evidence.
+  positive authorship evidence. The same ERROR state applies to configuration-enabled
+  initial-load failures, missing artifacts, hash mismatches, malformed protocol frames,
+  invalid response schemas and inconsistent channel results. Public responses never
+  include internal filesystem paths, stderr text, stack traces or raw exceptions.
 
 Short or technically ineligible text returns `INCONCLUSIVE` and the `ai_authorship` family is
 reported as `INSUFFICIENT_DATA`.
@@ -119,6 +131,17 @@ consumed HVSIA blind or the consumed HUMAN_LIKELY final blind, and they do not c
 fresh-blind performance claim for the composite.
 
 ## Deployment boundary
+
+The JSONL IPC avoids select.select on pipes and can operate on Windows, but the
+frozen research wrapper, absolute Nitro root and model dependency installation have
+NOT been demonstrated portable to a Windows product runtime. A passing Windows
+installer CI job does NOT validate composite runtime compatibility.
+
+Operational diagnostics: inspect readiness's composite_runtime status and structured
+web logs (exception class, stderr byte count and stderr SHA256 only). Do not log
+raw stderr, uploaded text, paths containing private case data or private model outputs.
+After an IPC fault, inspect/restart the whole supervised web process using a separate
+deployment procedure; there is no per-request auto-retry.
 
 This document does **not** authorize production deployment. Production remains unchanged until a
 separate deployment gate verifies artifact placement, host resources, service supervision,
