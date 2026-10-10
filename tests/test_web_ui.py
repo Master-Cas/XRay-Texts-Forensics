@@ -59,13 +59,18 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     page = web.get("/")
     script = web.get("/static/app.js")
 
-    assert "Overall forensic result" in page.text
+    assert "AI / human statistical classification" in page.text
     assert "Run full forensic scan" in page.text
     assert "Show technical Unicode evidence" in page.text
-    assert "Missing tests are reported as unavailable" in page.text
+    assert "Clasificación estadística, no prueba criptográfica de procedencia." in page.text
+    assert "never as negative evidence" in page.text
 
     assert '"/analyze/full"' in script.text
     assert "Reference comparison available" in script.text
+    assert "AI likely" in script.text
+    assert "Human likely" in script.text
+    assert "Inconclusive" in script.text
+    assert "Classifier unavailable" in script.text
     assert "Origin not testable yet" in script.text
     assert "Hidden zero-width characters" in script.text
     assert "Words mixing look-alike alphabets" in script.text
@@ -78,3 +83,44 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     assert "Add known-origin samples" in script.text
     assert ".odt" in script.text
     assert "incomplete private sets never disable the global baseline" in script.text
+
+
+def test_authorship_and_reference_origin_use_distinct_ui_surfaces(tmp_path) -> None:
+    web = client(tmp_path)
+    page = web.get("/")
+    script = web.get("/static/app.js")
+    assert page.status_code == 200
+    assert script.status_code == 200
+
+    assert "AI / human statistical classification" in page.text
+    assert "Reference comparison status" in page.text
+    assert "not proof of an author's identity" in page.text
+    assert 'aria-labelledby="reference-origin-title"' in page.text
+    for target in (
+        "origin-badge", "origin-title", "origin-text",
+        "reference-origin-badge", "reference-origin-title", "reference-origin-text",
+    ):
+        assert page.text.count(f'id="{target}"') == 1
+
+    authorship = script.text.split("function renderAuthorshipAssessment(", 1)[1].split(
+        "function renderOriginAssessment(", 1
+    )[0]
+    reference_origin = script.text.split("function renderOriginAssessment(", 1)[1].split(
+        "function renderReferenceComparison(", 1
+    )[0]
+    for target in ("origin-badge", "origin-title", "origin-text"):
+        assert f'$("{target}")' in authorship
+        assert f'$("{target}")' not in reference_origin
+    for target in ("reference-origin-badge", "reference-origin-title", "reference-origin-text"):
+        assert f'$("{target}")' in reference_origin
+        assert f'$("{target}")' not in authorship
+
+    scan = script.text.split("async function scanFile(", 1)[1].split(
+        "function reportUrl(", 1
+    )[0]
+    authorship_call = "renderAuthorshipAssessment(result.authorship_assessment);"
+    reference_call = "renderOriginAssessment(result.origin_assessment);"
+    assert authorship_call in scan
+    assert reference_call in scan
+    assert scan.index(authorship_call) < scan.index(reference_call)
+    assert "renderReferenceComparison(result.reference_comparison);" in scan

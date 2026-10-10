@@ -38,6 +38,8 @@ class WebSettings(BaseModel):
     oidc_allow_personal_tenant: bool = True
     oidc_token_auth_method: OidcTokenAuthMethod = "client_secret_post"
     reference_root: Path | None = None
+    composite_root: Path | None = None
+    composite_timeout_seconds: int = Field(default=60, ge=1, le=300)
     build_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
     @property
@@ -116,6 +118,12 @@ class WebSettings(BaseModel):
                 if os.environ.get("XRAY_REFERENCE_ROOT")
                 else None
             ),
+            composite_root=(
+                Path(os.environ["XRAY_COMPOSITE_ROOT"])
+                if os.environ.get("XRAY_COMPOSITE_ROOT")
+                else None
+            ),
+            composite_timeout_seconds=_env_int("XRAY_COMPOSITE_TIMEOUT_SECONDS", 60),
             build_sha=(
                 os.environ["XRAY_BUILD_SHA"].strip()
                 if os.environ.get("XRAY_BUILD_SHA")
