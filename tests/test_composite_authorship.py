@@ -145,7 +145,9 @@ def test_loader_rejects_unverified_runtime_without_importing_heavy_dependencies(
     assert result.classifier is None
     assert result.status == "error"
     assert result.reason is not None
-    assert "Missing frozen composite artifact" in result.reason
+    assert result.reason == "Frozen composite unavailable: RuntimeError"
+    assert str(root) not in result.reason
+    assert "Missing frozen composite artifact" not in result.reason
 
 
 def test_configured_unhealthy_worker_fails_live_readiness(tmp_path) -> None:
