@@ -8,7 +8,6 @@ turning absence of a detector into a negative result.
 from __future__ import annotations
 
 import math
-
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field

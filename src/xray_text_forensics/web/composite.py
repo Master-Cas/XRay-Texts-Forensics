@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -10,9 +11,10 @@ import queue
 import subprocess
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 from uuid import uuid4
 
 COMPOSITE_ID = "xtf-composite-v1"
@@ -309,30 +311,22 @@ class FrozenCompositeWorkerClient:
                 return
             self._closed.set()
             if process.poll() is None:
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     process.terminate()
-                except ProcessLookupError:
-                    pass
                 try:
                     grace = 0.4 if deadline is None else min(0.4, _remaining(deadline))
                     process.wait(timeout=grace)
                 except subprocess.TimeoutExpired:
-                    try:
+                    with contextlib.suppress(ProcessLookupError):
                         process.kill()
-                    except ProcessLookupError:
-                        pass
-                    try:
+                    with contextlib.suppress(subprocess.TimeoutExpired):
                         process.wait(
                             timeout=0.2 if deadline is None else _remaining(deadline)
                         )
-                    except subprocess.TimeoutExpired:
-                        pass
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
-                    try:
+                    with contextlib.suppress(OSError, ValueError):
                         stream.close()
-                    except (OSError, ValueError):
-                        pass
 
 
 def load_frozen_composite(
