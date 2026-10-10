@@ -27,6 +27,7 @@ from xray_text_forensics.runtime import analysis_context_from_ingest
 from xray_text_forensics.storage import ContentAddressedStore
 from xray_text_forensics.stylometry import ReferenceComparator
 
+from .composite import CompositeClassifier, load_frozen_composite
 from .desktop_access import DesktopAccessMiddleware
 from .full_scan import FullScanResponse, load_reference_comparator, run_full_scan
 from .identity import (
@@ -139,6 +140,7 @@ def create_app(
     *,
     identity_provider: IdentityProvider | None = None,
     oidc_client: OidcClientProtocol | None = None,
+    composite_classifier: CompositeClassifier | None = None,
 ) -> FastAPI:
     settings = settings or WebSettings()
     settings.data_root.mkdir(parents=True, exist_ok=True)
@@ -172,6 +174,24 @@ def create_app(
     reference_comparator, reference_warning_count = load_reference_comparator(settings)
     app.state.reference_comparator = reference_comparator
     app.state.reference_warning_count = reference_warning_count
+
+    if composite_classifier is None:
+        composite_load = load_frozen_composite(
+            settings.composite_root,
+            timeout_seconds=settings.composite_timeout_seconds,
+        )
+        composite_classifier = composite_load.classifier
+        composite_status = composite_load.status
+        composite_unavailable_reason = composite_load.reason
+    else:
+        composite_status = "ok"
+        composite_unavailable_reason = None
+    app.state.composite_classifier = composite_classifier
+    app.state.composite_status = composite_status
+    app.state.composite_unavailable_reason = composite_unavailable_reason
+    composite_close = getattr(composite_classifier, "close", None)
+    if callable(composite_close):
+        app.router.add_event_handler("shutdown", composite_close)
     reference_library = TenantReferenceLibrary(max_input_bytes=settings.max_upload_bytes)
     app.state.reference_library = reference_library
 
@@ -314,7 +334,19 @@ def create_app(
 
     @app.get("/api/v1/ready", response_model=None)
     def ready() -> JSONResponse:
-        response = _readiness(settings, oidc_store)
+        composite_status = app.state.composite_status
+        composite_health = getattr(app.state.composite_classifier, "health", None)
+        if composite_status == "ok" and callable(composite_health):
+            try:
+                if not composite_health():
+                    composite_status = "error"
+            except Exception:
+                composite_status = "error"
+        response = _readiness(
+            settings,
+            oidc_store,
+            composite_status=composite_status,
+        )
         status_code = 200 if response.status == "ready" else 503
         return JSONResponse(
             status_code=status_code,
@@ -390,6 +422,8 @@ def create_app(
             comparator=comparator,
             reference_warning_count=warning_count,
             reference_unavailable_reason=unavailable_reason,
+            authorship_classifier=app.state.composite_classifier,
+            authorship_unavailable_reason=app.state.composite_unavailable_reason,
         )
 
     @app.get("/api/v1/references/status", response_model=ReferenceLibraryStatus)
@@ -724,9 +758,12 @@ def _identity_provider(settings: WebSettings) -> IdentityProvider:
 def _readiness(
     settings: WebSettings,
     oidc_store: OidcSessionStore | None = None,
+    *,
+    composite_status: str = "not_configured",
 ) -> ReadinessResponse:
     checks: dict[str, str] = {
         "identity_mode": settings.identity_mode,
+        "composite_runtime": composite_status,
     }
     schema_version: int | None = None
 
@@ -767,12 +804,14 @@ def _readiness(
             and checks.get("auth_journal_mode") == "wal"
         )
     )
+    composite_ok = settings.composite_root is None or composite_status == "ok"
     required_ok = (
         checks.get("database") == "ok"
         and checks.get("journal_mode") == "wal"
         and checks.get("object_store") == "ok"
         and "object_store_cleanup" not in checks
         and oidc_ok
+        and composite_ok
     )
     return ReadinessResponse(
         status="ready" if required_ok else "not_ready",

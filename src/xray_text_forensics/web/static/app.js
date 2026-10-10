@@ -137,6 +137,29 @@ function renderFamilySummaries(rows) {
   }
 }
 
+function renderAuthorshipAssessment(assessment) {
+  const badge = $("origin-badge");
+  $("origin-title").textContent = assessment.headline;
+  $("origin-text").textContent = assessment.explanation + " " + assessment.disclaimer;
+
+  if (assessment.state === "AI_LIKELY") {
+    badge.textContent = "AI likely";
+    badge.className = "status status-warn";
+  } else if (assessment.state === "HUMAN_LIKELY") {
+    badge.textContent = "Human likely";
+    badge.className = "status status-good";
+  } else if (assessment.state === "INCONCLUSIVE") {
+    badge.textContent = assessment.eligible === false ? "Insufficient text" : "Inconclusive";
+    badge.className = "status status-warn";
+  } else if (assessment.state === "ERROR") {
+    badge.textContent = "Classifier error";
+    badge.className = "status status-bad";
+  } else {
+    badge.textContent = "Classifier unavailable";
+    badge.className = "status status-warn";
+  }
+}
+
 function renderOriginAssessment(origin) {
   const badge = $("origin-badge");
   $("origin-title").textContent = origin.headline;
@@ -556,7 +579,7 @@ async function scanFile(file) {
       { label: "Encoding", value: result.artifact.detected_encoding || "n/a" },
       { label: "Views", value: result.views.length },
     ]);
-    renderOriginAssessment(result.origin_assessment);
+    renderAuthorshipAssessment(result.authorship_assessment);
     renderFamilySummaries(result.family_summaries || []);
     renderReferenceComparison(result.reference_comparison);
     renderPlainLanguageEvidence(result.unicode_evidence || []);

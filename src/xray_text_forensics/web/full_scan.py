@@ -7,7 +7,7 @@ turning absence of a detector into a negative result.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -25,11 +25,13 @@ from xray_text_forensics.stylometry import (
 )
 from xray_text_forensics.stylometry.loaders import load_reference_root
 
+from .composite import CompositeClassifier
 from .models import IngestResponse
 from .settings import WebSettings
 
 FamilyState = Literal["COMPLETE", "NOT_TESTABLE", "INSUFFICIENT_DATA", "ERROR"]
 OriginState = Literal["NOT_TESTABLE", "REFERENCE_COMPARISON"]
+AuthorshipState = Literal["AI_LIKELY", "HUMAN_LIKELY", "INCONCLUSIVE", "NOT_TESTABLE", "ERROR"]
 
 
 class AnalysisFamilySummary(BaseModel):
@@ -45,6 +47,19 @@ class OriginAssessment(BaseModel):
     explanation: str
 
 
+class AuthorshipAssessment(BaseModel):
+    state: AuthorshipState
+    headline: str
+    explanation: str
+    disclaimer: str = "Clasificación estadística, no prueba criptográfica de procedencia."
+    eligible: bool | None = None
+    original_tokens: int | None = None
+    ai_likely: bool | None = None
+    human_likely: bool | None = None
+    diagnostics: dict[str, float | int | bool | str | None] = Field(default_factory=dict)
+    versions: dict[str, str] = Field(default_factory=dict)
+
+
 class FullScanResponse(IngestResponse):
     unicode_evidence: list[Evidence]
     linguistic_snapshot: CorpusSnapshot | None = None
@@ -52,6 +67,7 @@ class FullScanResponse(IngestResponse):
     reference_comparison: ReferenceComparisonReport | None = None
     family_summaries: list[AnalysisFamilySummary] = Field(default_factory=list)
     origin_assessment: OriginAssessment
+    authorship_assessment: AuthorshipAssessment
     scientific_note: str = (
         "XRay keeps Unicode, linguistic, stylometric, watermark and provenance signals "
         "separate. Similarity to a reference corpus is not an authorship probability, "
@@ -86,6 +102,8 @@ def run_full_scan(
     comparator: ReferenceComparator | None,
     reference_warning_count: int = 0,
     reference_unavailable_reason: str | None = None,
+    authorship_classifier: CompositeClassifier | None = None,
+    authorship_unavailable_reason: str | None = None,
 ) -> FullScanResponse:
     context = analysis_context_from_ingest(result)
     unicode_evidence = UnicodeForensicsSuite().analyze(context)
@@ -93,7 +111,13 @@ def run_full_scan(
 
     selected = context.preferred_text_view()
     if selected is None:
+        authorship = _authorship_assessment(
+            None,
+            authorship_classifier,
+            authorship_unavailable_reason,
+        )
         families = [
+            _authorship_summary(authorship),
             _unicode_summary(unicode_evidence),
             AnalysisFamilySummary(
                 family="linguistic_profile",
@@ -113,6 +137,7 @@ def run_full_scan(
             unicode_evidence=unicode_evidence,
             family_summaries=families,
             origin_assessment=_origin_assessment(None),
+            authorship_assessment=authorship,
         )
 
     _, text = selected
@@ -129,7 +154,14 @@ def run_full_scan(
     if comparator is not None:
         reference_report = comparator.compare(text)
 
+    authorship = _authorship_assessment(
+        text,
+        authorship_classifier,
+        authorship_unavailable_reason,
+    )
+
     families = [
+        _authorship_summary(authorship),
         _unicode_summary(unicode_evidence),
         _linguistic_summary(linguistic_snapshot),
         _reference_summary(
@@ -149,6 +181,118 @@ def run_full_scan(
         reference_comparison=reference_report,
         family_summaries=families,
         origin_assessment=_origin_assessment(reference_report),
+        authorship_assessment=authorship,
+    )
+
+
+def _authorship_assessment(
+    text: str | None,
+    classifier: CompositeClassifier | None,
+    unavailable_reason: str | None,
+) -> AuthorshipAssessment:
+    if text is None:
+        return AuthorshipAssessment(
+            state="NOT_TESTABLE",
+            headline="Authorship classifier not testable",
+            explanation="No usable text view was available for the frozen authorship classifier.",
+        )
+    if classifier is None:
+        return AuthorshipAssessment(
+            state="NOT_TESTABLE",
+            headline="Authorship classifier unavailable",
+            explanation=(
+                unavailable_reason
+                or "The frozen XTF composite runtime is not configured for this deployment."
+            ),
+        )
+
+    try:
+        result = classifier.classify(text)
+    except Exception:
+        return AuthorshipAssessment(
+            state="ERROR",
+            headline="Authorship classifier error",
+            explanation=(
+                "The frozen classifier could not complete this scan. XRay does not convert "
+                "runtime failure into AI, human, or negative evidence."
+            ),
+        )
+
+    state = str(result.get("state", ""))
+    if state not in {"AI_LIKELY", "HUMAN_LIKELY", "INCONCLUSIVE"}:
+        return AuthorshipAssessment(
+            state="ERROR",
+            headline="Authorship classifier returned an invalid state",
+            explanation=(
+                "The result was rejected instead of being coerced into an authorship verdict."
+            ),
+        )
+
+    explanations = {
+        "AI_LIKELY": (
+            "AI-like statistical evidence detected",
+            "The frozen AI_LIKELY channel fired. This statistical classification has "
+            "precedence over the independent HUMAN_LIKELY channel and is not proof of "
+            "provider provenance.",
+        ),
+        "HUMAN_LIKELY": (
+            "Human-like statistical evidence detected",
+            "The AI_LIKELY channel did not fire and the independent frozen HUMAN_LIKELY "
+            "channel did. This is statistical evidence, not proof of human authorship.",
+        ),
+        "INCONCLUSIVE": (
+            "Authorship remains inconclusive",
+            "Neither frozen positive channel produced sufficient evidence. INCONCLUSIVE is "
+            "not converted into human or AI attribution.",
+        ),
+    }
+    typed_state = cast(AuthorshipState, state)
+    headline, explanation = explanations[typed_state]
+    diagnostic_names = (
+        "parent_score",
+        "specialist_score",
+        "combined_score",
+        "p_human",
+        "human_density_score",
+        "human_score",
+    )
+    diagnostics = {name: result.get(name) for name in diagnostic_names}
+    versions = {
+        str(key): str(value)
+        for key, value in dict(result.get("versions") or {}).items()
+    }
+    return AuthorshipAssessment(
+        state=typed_state,
+        headline=headline,
+        explanation=explanation,
+        eligible=bool(result.get("eligible", False)),
+        original_tokens=(
+            int(result["original_tokens"])
+            if result.get("original_tokens") is not None
+            else None
+        ),
+        ai_likely=bool(result.get("ai_likely", False)),
+        human_likely=bool(result.get("human_likely", False)),
+        diagnostics=diagnostics,
+        versions=versions,
+    )
+
+
+def _authorship_summary(assessment: AuthorshipAssessment) -> AnalysisFamilySummary:
+    if assessment.state == "NOT_TESTABLE":
+        state: FamilyState = "NOT_TESTABLE"
+    elif assessment.state == "ERROR":
+        state = "ERROR"
+    elif assessment.eligible is False:
+        state = "INSUFFICIENT_DATA"
+    else:
+        state = "COMPLETE"
+
+    return AnalysisFamilySummary(
+        family="ai_authorship",
+        title="AI / human statistical classification",
+        state=state,
+        summary=f"{assessment.headline}. {assessment.disclaimer}",
     )
 
 

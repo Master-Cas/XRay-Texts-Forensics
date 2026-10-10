@@ -59,13 +59,18 @@ def test_quick_scan_includes_plain_language_evidence_layer(tmp_path) -> None:
     page = web.get("/")
     script = web.get("/static/app.js")
 
-    assert "Overall forensic result" in page.text
+    assert "AI / human statistical classification" in page.text
     assert "Run full forensic scan" in page.text
     assert "Show technical Unicode evidence" in page.text
-    assert "Missing tests are reported as unavailable" in page.text
+    assert "Clasificación estadística, no prueba criptográfica de procedencia." in page.text
+    assert "never as negative evidence" in page.text
 
     assert '"/analyze/full"' in script.text
     assert "Reference comparison available" in script.text
+    assert "AI likely" in script.text
+    assert "Human likely" in script.text
+    assert "Inconclusive" in script.text
+    assert "Classifier unavailable" in script.text
     assert "Origin not testable yet" in script.text
     assert "Hidden zero-width characters" in script.text
     assert "Words mixing look-alike alphabets" in script.text

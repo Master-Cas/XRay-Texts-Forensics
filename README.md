@@ -128,10 +128,11 @@ Operational endpoints:
 - `GET /api/v1/health` — process liveness
 - `GET /api/v1/ready` — database/object-store readiness
 - `GET /api/v1/session` — authenticated principal
-- `POST /api/v1/analyze/full` — multi-family forensic scan with explicit NOT_TESTABLE states
+- `POST /api/v1/analyze/full` — multi-family forensic scan with explicit NOT_TESTABLE states; when `XRAY_COMPOSITE_ROOT` is configured it also returns the frozen three-state `authorship_assessment` (`AI_LIKELY`, `HUMAN_LIKELY`, or `INCONCLUSIVE`)
 - `GET/POST /api/v1/references` — tenant-scoped known-origin reference library
 - `POST /api/v1/references/{set_slug}/documents` — add content-deduplicated reference samples
 - Global reference/benchmark data is versioned separately in `Master-Cas/XRay-Benchmarks` and mounted via `XRAY_REFERENCE_ROOT`.
+- Frozen XTF Composite v1 runtime integration is documented in `docs/operations/xtf-composite-v1.md`; production deployment requires a separate deployment gate.
 
 The default bind is `127.0.0.1:8080`.
 
