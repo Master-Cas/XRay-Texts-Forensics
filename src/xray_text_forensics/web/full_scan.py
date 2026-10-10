@@ -7,7 +7,8 @@ turning absence of a detector into a negative result.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+import math
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -185,6 +186,52 @@ def run_full_scan(
     )
 
 
+def _validate_authorship_result(value: object) -> dict[str, Any]:
+    """Strict integration schema; no thresholds or scientific logic are changed."""
+    if not isinstance(value, dict):
+        raise ValueError("Invalid composite response")
+    state = value.get("state")
+    eligible = value.get("eligible")
+    ai = value.get("ai_likely")
+    human = value.get("human_likely")
+    tokens = value.get("original_tokens")
+    if type(state) is not str or state not in {"AI_LIKELY", "HUMAN_LIKELY", "INCONCLUSIVE"}:
+        raise ValueError("Unknown composite state")
+    if type(eligible) is not bool or type(ai) is not bool or type(human) is not bool:
+        raise ValueError("Invalid channel booleans")
+    if type(tokens) is not int or tokens < 0:
+        raise ValueError("Invalid token count")
+    if not eligible and (ai or human or state != "INCONCLUSIVE"):
+        raise ValueError("An ineligible row cannot be positive")
+    expected = "AI_LIKELY" if ai else "HUMAN_LIKELY" if human else "INCONCLUSIVE"
+    if state != expected:
+        raise ValueError("Frozen precedence contradiction")
+    mandatory = (
+        "parent_score", "specialist_score", "p_human",
+        "human_density_score", "human_score",
+    )
+    if any(name not in value for name in mandatory):
+        raise ValueError("Missing composite diagnostics")
+    for key in (*mandatory, "combined_score"):
+        v = value.get(key)
+        if v is not None and (type(v) not in (float, int) or not math.isfinite(v)):
+            raise ValueError("Invalid numeric diagnostic")
+    prob = value.get("p_human")
+    if prob is not None and not 0.0 <= prob <= 1.0:
+        raise ValueError("Invalid probability")
+    if eligible and any(value.get(key) is None for key in mandatory):
+        raise ValueError("Eligible sample missing scores")
+    versions = value.get("versions")
+    if not isinstance(versions, dict) or not versions:
+        raise ValueError("Missing frozen identifiers")
+    if any(
+        not isinstance(k, str) or not k or not isinstance(v, str) or not v
+        for k, v in versions.items()
+    ):
+        raise ValueError("Invalid frozen identifiers")
+    return value
+
+
 def _authorship_assessment(
     text: str | None,
     classifier: CompositeClassifier | None,
@@ -197,18 +244,59 @@ def _authorship_assessment(
             explanation="No usable text view was available for the frozen authorship classifier.",
         )
     if classifier is None:
+        if unavailable_reason:
+            return AuthorshipAssessment(
+                state="ERROR",
+                headline="Authorship classifier initialization error",
+                explanation="A configured frozen runtime failed verification or initialization.",
+            )
         return AuthorshipAssessment(
             state="NOT_TESTABLE",
             headline="Authorship classifier unavailable",
-            explanation=(
-                unavailable_reason
-                or "The frozen XTF composite runtime is not configured for this deployment."
-            ),
+            explanation="The frozen XTF composite runtime is not configured for this deployment.",
         )
-
     try:
-        result = classifier.classify(text)
+        result = _validate_authorship_result(classifier.classify(text))
+        state = cast(AuthorshipState, result["state"])
+        explanations = {
+            "AI_LIKELY": (
+                "AI-like statistical evidence detected",
+                "The frozen AI_LIKELY channel fired. This statistical classification has "
+                "precedence over the independent HUMAN_LIKELY channel and is not proof of "
+                "provider provenance.",
+            ),
+            "HUMAN_LIKELY": (
+                "Human-like statistical evidence detected",
+                "The AI_LIKELY channel did not fire and the independent frozen HUMAN_LIKELY "
+                "channel did. This is statistical evidence, not proof of human authorship.",
+            ),
+            "INCONCLUSIVE": (
+                "Authorship remains inconclusive",
+                "Neither frozen positive channel produced sufficient evidence. INCONCLUSIVE is "
+                "not converted into human or AI attribution.",
+            ),
+        }
+        headline, explanation = explanations[state]
+        diagnostics = {
+            name: result.get(name)
+            for name in (
+                "parent_score", "specialist_score", "combined_score", "p_human",
+                "human_density_score", "human_score",
+            )
+        }
+        return AuthorshipAssessment(
+            state=state,
+            headline=headline,
+            explanation=explanation,
+            eligible=result["eligible"],
+            original_tokens=result["original_tokens"],
+            ai_likely=result["ai_likely"],
+            human_likely=result["human_likely"],
+            diagnostics=diagnostics,
+            versions=result["versions"],
+        )
     except Exception:
+        # No internal error strings, model paths, or user text in public output.
         return AuthorshipAssessment(
             state="ERROR",
             headline="Authorship classifier error",
@@ -217,65 +305,6 @@ def _authorship_assessment(
                 "runtime failure into AI, human, or negative evidence."
             ),
         )
-
-    state = str(result.get("state", ""))
-    if state not in {"AI_LIKELY", "HUMAN_LIKELY", "INCONCLUSIVE"}:
-        return AuthorshipAssessment(
-            state="ERROR",
-            headline="Authorship classifier returned an invalid state",
-            explanation=(
-                "The result was rejected instead of being coerced into an authorship verdict."
-            ),
-        )
-
-    explanations = {
-        "AI_LIKELY": (
-            "AI-like statistical evidence detected",
-            "The frozen AI_LIKELY channel fired. This statistical classification has "
-            "precedence over the independent HUMAN_LIKELY channel and is not proof of "
-            "provider provenance.",
-        ),
-        "HUMAN_LIKELY": (
-            "Human-like statistical evidence detected",
-            "The AI_LIKELY channel did not fire and the independent frozen HUMAN_LIKELY "
-            "channel did. This is statistical evidence, not proof of human authorship.",
-        ),
-        "INCONCLUSIVE": (
-            "Authorship remains inconclusive",
-            "Neither frozen positive channel produced sufficient evidence. INCONCLUSIVE is "
-            "not converted into human or AI attribution.",
-        ),
-    }
-    typed_state = cast(AuthorshipState, state)
-    headline, explanation = explanations[typed_state]
-    diagnostic_names = (
-        "parent_score",
-        "specialist_score",
-        "combined_score",
-        "p_human",
-        "human_density_score",
-        "human_score",
-    )
-    diagnostics = {name: result.get(name) for name in diagnostic_names}
-    versions = {
-        str(key): str(value)
-        for key, value in dict(result.get("versions") or {}).items()
-    }
-    return AuthorshipAssessment(
-        state=typed_state,
-        headline=headline,
-        explanation=explanation,
-        eligible=bool(result.get("eligible", False)),
-        original_tokens=(
-            int(result["original_tokens"])
-            if result.get("original_tokens") is not None
-            else None
-        ),
-        ai_likely=bool(result.get("ai_likely", False)),
-        human_likely=bool(result.get("human_likely", False)),
-        diagnostics=diagnostics,
-        versions=versions,
-    )
 
 
 def _authorship_summary(assessment: AuthorshipAssessment) -> AnalysisFamilySummary:

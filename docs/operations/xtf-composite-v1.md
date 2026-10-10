@@ -45,9 +45,18 @@ pipes. The worker loads XLM-R once and stays resident for subsequent scans.
 This avoids changing the web dependency graph to satisfy the frozen Torch/Transformers stack and
 avoids changing the frozen ML environment to satisfy web dependencies.
 
-Requests are serialized through a process-local lock so a single worker cannot interleave JSON
-responses. Separate web processes require separate workers unless a future, separately reviewed
-service architecture is introduced.
+The IPC client uses bounded binary pipes with background stdout/stderr readers and a
+bounded write queue. Its full-message timeout includes lock acquisition and IPC transfer,
+and reserves bounded time for process termination. A reply without a newline is not
+accepted. Individual responses are limited to 64 KiB; requests to 32 MiB. A broken
+exchange poisons the worker, which is terminated without automatic restart.
+
+A process-local web semaphore permits one full composite scan at a time. Excess
+requests receive HTTP 503 with Retry-After rather than waiting in an unbounded queue.
+Full scans run in a thread pool so /healthz and /api/v1/health remain responsive.
+Each web process has its own worker; horizontal scaling multiplies ML memory demand.
+Worker stderr is continuously drained, hashed and byte-counted for operational
+diagnosis without storing raw text or user input.
 
 ## Configuration
 
@@ -71,17 +80,28 @@ artifact-placement/deployment gate; do not silently rewrite paths inside the fro
 
 ## Readiness and failure behavior
 
-When no composite root is configured, the classifier is optional and `/api/v1/ready` reports
-`composite_runtime=not_configured` without failing overall readiness.
+When no composite root is configured, the classifier is optional and /api/v1/ready
+reports composite_runtime=not_configured; full scans report authorship NOT_TESTABLE.
 
 When a root is configured:
 
 - startup verifies hashes and starts the worker;
-- `/api/v1/ready` performs a live `ping` against the worker;
+- `/api/v1/ready` performs a bounded live `ping` only while the worker is idle;
+- /api/v1/health and /healthz are lightweight process liveness endpoints and
+  do not request inference or wait for the frozen worker;
+- /api/v1/ready distinguishes `composite_runtime=ok`, `busy`, and `error`;
+  `busy` means a live worker holds the one-request inference lock, so readiness
+  remains HTTP 200 rather than falsely reporting a broken worker;
 - a failed or dead worker makes readiness return HTTP 503 with `composite_runtime=error`;
+  an idle worker is checked with a bounded ping, while a busy worker is not pinged;
+- an absent configured root is `not_configured` and remains HTTP 200; a configured
+  runtime which failed startup is `error` and HTTP 503;
 - a full scan still preserves the rest of the forensic analysis, but reports
   `authorship_assessment.state=ERROR` rather than converting a runtime failure into negative or
-  positive authorship evidence.
+  positive authorship evidence. The same ERROR state applies to configuration-enabled
+  initial-load failures, missing artifacts, hash mismatches, malformed protocol frames,
+  invalid response schemas and inconsistent channel results. Public responses never
+  include internal filesystem paths, stderr text, stack traces or raw exceptions.
 
 Short or technically ineligible text returns `INCONCLUSIVE` and the `ai_authorship` family is
 reported as `INSUFFICIENT_DATA`.
@@ -120,6 +140,27 @@ fresh-blind performance claim for the composite.
 
 ## Deployment boundary
 
+The JSONL IPC avoids select.select on pipes and has cross-platform subprocess pipe
+primitives. Synthetic IPC tests must be executed on a real Windows runner before
+Windows worker compatibility may be claimed. The
+frozen research wrapper, absolute Nitro root and model dependency installation have
+NOT been demonstrated portable to a Windows product runtime. A passing Windows
+installer CI job does NOT validate composite runtime compatibility.
+
+Operational diagnostics: inspect readiness's composite_runtime status and structured
+web logs (exception class, stderr byte count and stderr SHA256 only). Do not log
+raw stderr, uploaded text, paths containing private case data or private model outputs.
+After an IPC fault, inspect/restart the whole supervised web process using a separate
+deployment procedure; there is no per-request auto-retry.
+
 This document does **not** authorize production deployment. Production remains unchanged until a
 separate deployment gate verifies artifact placement, host resources, service supervision,
 rollback, observability and public response behavior on the target host.
+
+## Hardening-03 validation boundary
+
+This gate changes only web integration, synthetic worker tests and documentation.
+It does not alter, load, train or score scientific models or consumed blind samples.
+GitHub CI and a Windows synthetic-worker runner must validate the exact committed SHA.
+The Windows Desktop installer build alone is not sufficient. Production remains blocked
+until an independently authorized deployment gate.
