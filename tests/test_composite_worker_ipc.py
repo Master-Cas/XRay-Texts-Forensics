@@ -103,11 +103,16 @@ def test_initialization_failures_do_not_orphan_worker(
 
 def test_stderr_is_drained_without_storing_sensitive_text(tmp_path: Path) -> None:
     client = make_worker(tmp_path, "stderr_flood")
-    assert client.health()
-    assert client._stderr_bytes >= 131072
-    assert not hasattr(client, "stderr_text")
-    client.close()
-    assert client._process.poll() is not None
+    try:
+        assert client.health()
+        deadline = time.monotonic() + 3
+        while client._stderr_bytes < 131072 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert client._stderr_bytes >= 131072
+        assert not hasattr(client, "stderr_text")
+    finally:
+        client.close()
+        assert client._process.poll() is not None
 
 
 @pytest.mark.parametrize(
