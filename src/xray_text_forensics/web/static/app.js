@@ -137,10 +137,33 @@ function renderFamilySummaries(rows) {
   }
 }
 
-function renderOriginAssessment(origin) {
+function renderAuthorshipAssessment(assessment) {
   const badge = $("origin-badge");
-  $("origin-title").textContent = origin.headline;
-  $("origin-text").textContent = origin.explanation;
+  $("origin-title").textContent = assessment.headline;
+  $("origin-text").textContent = assessment.explanation + " " + assessment.disclaimer;
+
+  if (assessment.state === "AI_LIKELY") {
+    badge.textContent = "AI likely";
+    badge.className = "status status-warn";
+  } else if (assessment.state === "HUMAN_LIKELY") {
+    badge.textContent = "Human likely";
+    badge.className = "status status-good";
+  } else if (assessment.state === "INCONCLUSIVE") {
+    badge.textContent = assessment.eligible === false ? "Insufficient text" : "Inconclusive";
+    badge.className = "status status-warn";
+  } else if (assessment.state === "ERROR") {
+    badge.textContent = "Classifier error";
+    badge.className = "status status-bad";
+  } else {
+    badge.textContent = "Classifier unavailable";
+    badge.className = "status status-warn";
+  }
+}
+
+function renderOriginAssessment(origin) {
+  const badge = $("reference-origin-badge");
+  $("reference-origin-title").textContent = origin.headline;
+  $("reference-origin-text").textContent = origin.explanation;
   if (origin.state === "REFERENCE_COMPARISON") {
     badge.textContent = "Reference comparison available";
     badge.className = "status status-good";
@@ -556,6 +579,7 @@ async function scanFile(file) {
       { label: "Encoding", value: result.artifact.detected_encoding || "n/a" },
       { label: "Views", value: result.views.length },
     ]);
+    renderAuthorshipAssessment(result.authorship_assessment);
     renderOriginAssessment(result.origin_assessment);
     renderFamilySummaries(result.family_summaries || []);
     renderReferenceComparison(result.reference_comparison);
