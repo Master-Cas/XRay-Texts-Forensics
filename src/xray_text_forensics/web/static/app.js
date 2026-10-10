@@ -161,9 +161,9 @@ function renderAuthorshipAssessment(assessment) {
 }
 
 function renderOriginAssessment(origin) {
-  const badge = $("origin-badge");
-  $("origin-title").textContent = origin.headline;
-  $("origin-text").textContent = origin.explanation;
+  const badge = $("reference-origin-badge");
+  $("reference-origin-title").textContent = origin.headline;
+  $("reference-origin-text").textContent = origin.explanation;
   if (origin.state === "REFERENCE_COMPARISON") {
     badge.textContent = "Reference comparison available";
     badge.className = "status status-good";
@@ -580,6 +580,7 @@ async function scanFile(file) {
       { label: "Views", value: result.views.length },
     ]);
     renderAuthorshipAssessment(result.authorship_assessment);
+    renderOriginAssessment(result.origin_assessment);
     renderFamilySummaries(result.family_summaries || []);
     renderReferenceComparison(result.reference_comparison);
     renderPlainLanguageEvidence(result.unicode_evidence || []);
